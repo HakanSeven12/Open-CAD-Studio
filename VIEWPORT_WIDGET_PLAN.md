@@ -105,21 +105,28 @@ Added to `src/app/view.rs`. Builds a `stack![]` with:
 
 ---
 
-## Step 5 — Mouse Routing per Viewport (TODO)
+## ✅ Step 5 — Mouse Routing per Viewport
 
-Currently the `viewport_mouse` mouse_area covers the full canvas for both model and paper space. MSPACE detection already works via `Scene::active_viewport` + `viewport_at_paper_point()`. What remains:
+The full MSPACE routing chain is already wired and verified:
 
-- Double-click on a paper viewport → enter MSPACE (set `active_viewport`)
-- Escape → exit MSPACE (clear `active_viewport`)
-- Pan/zoom in MSPACE → route to `pan_active_viewport()` / `zoom_active_viewport()`
+- **Double-click** inside a paper viewport → `Message::EnterViewport(handle)` → `scene.active_viewport = Some(handle)` (`update.rs:1704`, `2540`)
+- **Escape** → `Message::ExitViewport` → `scene.active_viewport = None` (`update.rs:658`)
+- **Middle-drag** in MSPACE → `pan_active_viewport()` via `update.rs:1079–1080`
+- **Scroll** in MSPACE → `zoom_active_viewport()` via `update.rs:1784–1792`
 
-These are already partially wired — verify that MSPACE interactions reach the correct `ViewportPane::Paper` widget through the existing message handlers.
+`camera_for_viewport()` reads `view_target` / `view_height` fresh from the entity every frame, so the `ViewportPane::Paper` widget automatically reflects pan/zoom changes without any extra wiring.
 
 ---
 
-## Step 6 — Per-Viewport Layer Freeze Verification (TODO)
+## ✅ Step 6 — Per-Viewport Layer Freeze Verification
 
-`build_viewport_primitive()` calls `model_wires_for_viewport()` which filters by `vp.frozen_layers`. Verify that the frozen layer handles match the layer handles in the document (they should since both come from the same `CadDocument`).
+`model_wires_for_viewport()` (`mod.rs:2208`) uses the same handle-based filtering as the older `entity_content_wires()` (`mod.rs:697`):
+
+1. Reads `vp.frozen_layers: Vec<Handle>` from the viewport entity
+2. Looks up each entity's layer by name → gets its `Handle`
+3. Skips entities whose layer handle is in the frozen set
+
+Both sets of handles come from the same `CadDocument`, so they match correctly. Global layer visibility (`l.flags.off || l.flags.frozen`) is also applied before the per-viewport check.
 
 ---
 
@@ -129,8 +136,8 @@ These are already partially wired — verify that MSPACE interactions reach the 
 2. ✅ Per-viewport camera — derived from entity each frame
 3. ✅ `viewport_screen_rect()` — paper → pixel coordinate mapping
 4. ✅ `paper_canvas_view()` — stack of PaperSheet + Paper widgets
-5. **TODO** Mouse routing verification for MSPACE in paper space
-6. **TODO** Per-viewport layer freeze verification
+5. ✅ Mouse routing verification for MSPACE in paper space
+6. ✅ Per-viewport layer freeze verification
 
 ---
 
