@@ -96,6 +96,9 @@ impl H7CAD {
         if Some(window_id) == self.shortcuts_window {
             return crate::ui::shortcuts::view_window(&self.shortcut_overrides);
         }
+        if Some(window_id) == self.about_window {
+            return crate::ui::about::view_window();
+        }
 
         let i = self.active_tab;
         let tab = &self.tabs[i];

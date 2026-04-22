@@ -2,8 +2,11 @@
 
 pub mod clipboard;
 pub mod defaults;
+mod about;
+mod changelog;
 mod donate;
 pub mod draw;
+mod report;
 pub mod groups;
 pub mod inquiry;
 pub mod layers;
@@ -27,7 +30,10 @@ impl CadModule for HomeModule {
         use crate::modules::annotate::{angular_dim, leader_cmd, linear_dim, mleader_cmd, mtext, radius_dim, text};
         use crate::modules::insert::{create_block, insert_block};
         use clipboard::{copy_clip, cut, paste};
+        use about;
+        use changelog;
         use donate;
+        use report;
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use layers::{layfrz, laylck, layoff, layon, laythw, layulk, make_current, match_layer, panel};
         use groups::{group, ungroup};
@@ -187,6 +193,9 @@ impl CadModule for HomeModule {
                 title: "Support",
                 tools: vec![
                     RibbonItem::LargeTool(donate::tool()),
+                    report::tool().into(),
+                    about::tool().into(),
+                    changelog::tool().into(),
                 ],
             },
         ]

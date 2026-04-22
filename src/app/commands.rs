@@ -2042,6 +2042,20 @@ impl H7CAD {
                 self.command_line.push_info("Opening Patreon page...");
             }
 
+            "REPORT" => {
+                let _ = open::that("https://github.com/HakanSeven12/H7CAD/issues/new");
+                self.command_line.push_info("Opening GitHub issue page...");
+            }
+
+            "ABOUT" => {
+                return Task::done(Message::AboutOpen);
+            }
+
+            "CHANGELOG" => {
+                let _ = open::that("https://github.com/HakanSeven12/H7CAD/releases");
+                self.command_line.push_info("Opening release notes...");
+            }
+
             // ── Keyboard Shortcuts panel ──────────────────────────────────
             cmd if cmd == "SHORTCUTS" || cmd.starts_with("SHORTCUTS ") => {
                 let raw_rest = cmd.trim_start_matches("SHORTCUTS").trim();

@@ -68,6 +68,7 @@ pub(super) struct H7CAD {
     plotstyle_window:       Option<window::Id>,
     dimstyle_window:        Option<window::Id>,
     shortcuts_window:       Option<window::Id>,
+    about_window:           Option<window::Id>,
     /// In-memory clipboard: cloned entities waiting to be pasted.
     clipboard: Vec<acadrust::EntityType>,
     /// Centroid of the clipboard entities (XZ plane, Y-up).
@@ -372,6 +373,9 @@ pub enum Message {
     ShortcutsPanelOpen,
     #[allow(dead_code)]
     ShortcutsPanelClose,
+    // ── About window ────────────────────────────────────────────────────
+    AboutOpen,
+    AboutCopyInfo,
     /// Close the viewport right-click context menu without performing any action.
     ViewportContextMenuClose,
     /// A window was closed by the OS (e.g. the user clicked the title-bar ✕).
@@ -552,6 +556,7 @@ impl H7CAD {
             plotstyle_window:      None,
             dimstyle_window:       None,
             shortcuts_window:      None,
+            about_window:          None,
             clipboard: Vec::new(),
             clipboard_centroid: glam::Vec3::ZERO,
             layout_context_menu: None,
@@ -644,6 +649,7 @@ pub fn run() -> iced::Result {
             if Some(window_id) == state.plotstyle_window     { return "Plot Style Table Editor".into(); }
             if Some(window_id) == state.dimstyle_window      { return "Dimension Style Manager".into(); }
             if Some(window_id) == state.shortcuts_window     { return "Keyboard Shortcuts".into(); }
+            if Some(window_id) == state.about_window         { return "About H7CAD".into(); }
             if let Some(tab) = state.tabs.get(state.active_tab) {
                 let dot = if tab.dirty { "● " } else { "" };
                 let name = tab.tab_display_name();

@@ -704,6 +704,7 @@ impl H7CAD {
                 if self.plotstyle_window     == Some(id) { self.plotstyle_window     = None; }
                 if self.dimstyle_window      == Some(id) { self.dimstyle_window      = None; }
                 if self.shortcuts_window     == Some(id) { self.shortcuts_window     = None; }
+                if self.about_window         == Some(id) { self.about_window         = None; }
                 Task::none()
             }
 
@@ -2500,6 +2501,30 @@ impl H7CAD {
                 } else {
                     Task::none()
                 }
+            }
+
+            // ── About window ──────────────────────────────────────────────
+            Message::AboutOpen => {
+                if let Some(id) = self.about_window {
+                    return window::gain_focus(id);
+                }
+                let (id, task) = window::open(window::Settings {
+                    size: iced::Size::new(340.0, 240.0),
+                    resizable: false,
+                    ..Default::default()
+                });
+                self.about_window = Some(id);
+                task.map(|_| Message::Noop)
+            }
+
+            Message::AboutCopyInfo => {
+                let info = format!(
+                    "H7CAD v{}\nOS: {}\nArch: {}",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH,
+                );
+                iced::clipboard::write(info)
             }
 
             Message::ViewportContextMenuClose => {

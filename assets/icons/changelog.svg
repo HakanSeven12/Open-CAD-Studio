@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Clock circle -->
+  <circle cx="12" cy="12" r="9"/>
+  <!-- Clock hands -->
+  <polyline points="12,7 12,12 15.5,15.5"/>
+  <!-- Counter-clockwise arrow suggesting history -->
+  <path d="M5.6 5.6 A8.5 8.5 0 0 0 3 12" stroke-width="1.5"/>
+  <polyline points="2,9.5 3,12 5.5,10.8"/>
+</svg>
