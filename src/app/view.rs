@@ -108,7 +108,7 @@ impl H7CAD {
         let viewport_3d: Element<'_, Message> = if is_paper {
             paper_canvas_view(tab)
         } else {
-            shader(ViewportPane::model(&tab.scene))
+            shader(ViewportPane::model(&tab.scene, self.show_viewcube))
                 .width(Fill)
                 .height(Fill)
                 .into()

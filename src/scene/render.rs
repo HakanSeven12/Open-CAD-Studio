@@ -88,6 +88,7 @@ pub struct Primitive {
     pub(super) hover_region: Option<usize>,
     /// Background color used to clear the MSAA buffer at the start of each frame.
     pub(super) bg_color: [f32; 4],
+    pub(super) show_viewcube: bool,
 }
 
 // ── shader::Primitive impl ────────────────────────────────────────────────
@@ -120,13 +121,15 @@ impl shader::Primitive for Primitive {
         pipeline.upload_images(device, queue, &self.images);
         pipeline.upload_meshes(device, &self.meshes);
         pipeline.upload_wires(device, &self.wires);
-        pipeline.viewcube.upload(
-            queue,
-            self.cam_rotation,
-            bounds.width as u32,
-            bounds.height as u32,
-            self.hover_region,
-        );
+        if self.show_viewcube {
+            pipeline.viewcube.upload(
+                queue,
+                self.cam_rotation,
+                bounds.width as u32,
+                bounds.height as u32,
+                self.hover_region,
+            );
+        }
     }
 
     fn render(
@@ -137,7 +140,9 @@ impl shader::Primitive for Primitive {
         clip: &Rectangle<u32>,
     ) {
         pipeline.render(encoder, target, *clip, self.bg_color);
-        pipeline.viewcube.render(encoder, target, *clip);
+        if self.show_viewcube {
+            pipeline.viewcube.render(encoder, target, *clip);
+        }
     }
 }
 
@@ -216,6 +221,7 @@ impl Scene {
         &self,
         hover_region: Option<usize>,
         bounds: Rectangle,
+        show_viewcube: bool,
     ) -> Primitive {
         let cam = self.camera.borrow();
         self.selection.borrow_mut().vp_size = (bounds.width, bounds.height);
@@ -242,6 +248,7 @@ impl Scene {
             cam_rotation: cam.view_rotation_mat(),
             hover_region,
             bg_color,
+            show_viewcube,
         }
     }
 
@@ -256,7 +263,7 @@ impl Scene {
     ) -> Primitive {
         let cam = match self.camera_for_viewport(vp_handle) {
             Some(c) => c,
-            None => return self.build_primitive(hover_region, bounds),
+            None => return self.build_primitive(hover_region, bounds, false),
         };
 
         let mut all_wires = self.model_wires_for_viewport(vp_handle);
@@ -275,6 +282,7 @@ impl Scene {
             cam_rotation: cam.view_rotation_mat(),
             hover_region,
             bg_color: self.bg_color,
+            show_viewcube: false,
         }
     }
 

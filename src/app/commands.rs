@@ -3700,6 +3700,20 @@ impl H7CAD {
                             "UCSICON {sub}: updated {count} viewport(s) + model space."
                         ));
                     }
+                    "" => {
+                        // Bare UCSICON toggles visibility.
+                        self.push_undo_snapshot(i, "UCSICON");
+                        let visible = !self.show_ucs_icon;
+                        self.show_ucs_icon = visible;
+                        for entity in self.tabs[i].scene.document.entities_mut() {
+                            if let acadrust::EntityType::Viewport(vp) = entity {
+                                vp.status.ucs_icon_visible = visible;
+                            }
+                        }
+                        self.tabs[i].dirty = true;
+                        let state = if visible { "ON" } else { "OFF" };
+                        self.command_line.push_output(&format!("UCSICON {state}"));
+                    }
                     _ => {
                         self.command_line.push_info("Usage: UCSICON ON | OFF | NOORIGIN | ORIGIN");
                     }
