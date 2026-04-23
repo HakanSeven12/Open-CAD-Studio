@@ -92,7 +92,7 @@ impl StatusBar {
             osnap_btn(osnap_active, snapper.snap_enabled, popup_open),
             tip(
                 space_mode_btn(&current_layout, in_mspace),
-                "Toggle Model/Paper space\nDouble-click viewport to enter MSPACE",
+                "PAPER: double-click viewport to enter MSPACE\nMODEL: click to switch to Model Space",
             ),
             status_pill(scale_label),
         ]
@@ -460,9 +460,9 @@ fn space_mode_btn(current_layout: &str, in_mspace: bool) -> Element<'static, Mes
     //   PAPER = currently in paper-space editing
     //   MODEL = currently in model-space editing (either the Model tab or MSPACE)
     let (label, active, on_press) = if is_model_tab {
-        ("MODEL", false, None)
+        ("MODEL", false, None::<Message>)
     } else if in_mspace {
-        ("MODEL", true, Some(Message::ExitViewport))
+        ("MODEL", true, Some(Message::LayoutSwitch("Model".to_string())))
     } else {
         ("PAPER", false, Some(Message::MspaceCommand))
     };

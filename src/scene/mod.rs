@@ -2169,45 +2169,51 @@ impl Scene {
     /// Convert a paper-space Viewport entity's position/size into a pixel
     /// `Rectangle` relative to the top-left of the paper canvas.
     ///
-    /// `canvas_px`  — the pixel dimensions of the area that shows the paper.
-    /// Map a paper-space viewport into screen-pixel coordinates.
-    /// Used to position the active-viewport widget in MSPACE paper space.
+    /// Uses the same camera-based ortho transform as `PaperCanvas::draw()` so
+    /// that the overlay lands exactly over the drawn viewport border regardless
+    /// of zoom or pan level.
     pub fn viewport_screen_rect(
         &self,
         vp_handle: Handle,
         canvas_px: (f32, f32),
     ) -> Option<iced::Rectangle> {
-        let ((px0, py0), (px1, py1)) = self.paper_limits()?;
-        let paper_w = (px1 - px0) as f32;
-        let paper_h = (py1 - py0) as f32;
-        if paper_w < 1e-6 || paper_h < 1e-6 {
-            return None;
-        }
-
         let vp = match self.document.get_entity(vp_handle) {
             Some(EntityType::Viewport(vp)) => vp,
             _ => return None,
         };
 
         let (canvas_w, canvas_h) = canvas_px;
-        let sx = canvas_w / paper_w;
-        let sy = canvas_h / paper_h;
+        if canvas_w < 1.0 || canvas_h < 1.0 {
+            return None;
+        }
+
+        let cam = self.camera.borrow();
+        let aspect = canvas_w / canvas_h;
+        let half_h = cam.ortho_size();
+        let half_w = half_h * aspect;
+        let tx = cam.target.x;
+        let ty = cam.target.y;
+        drop(cam);
+
+        // Mirror the to_px closure in PaperCanvas::draw().
+        let to_px = |wx: f32, wy: f32| -> (f32, f32) {
+            let x = (wx - tx + half_w) / (2.0 * half_w) * canvas_w;
+            let y = (ty + half_h - wy) / (2.0 * half_h) * canvas_h;
+            (x, y)
+        };
 
         let cx = vp.center.x as f32;
         let cy = vp.center.y as f32;
         let hw = (vp.width / 2.0) as f32;
         let hh = (vp.height / 2.0) as f32;
 
-        // Map paper coords (origin = paper min, Y up) → screen (Y down).
-        let screen_x = (cx - hw - px0 as f32) * sx;
-        let screen_y = (py1 as f32 - (cy + hh)) * sy;
+        let (x0, y0) = to_px(cx - hw, cy + hh); // top-left in screen
+        let (x1, y1) = to_px(cx + hw, cy - hh); // bottom-right in screen
 
-        Some(iced::Rectangle {
-            x: screen_x,
-            y: screen_y,
-            width: vp.width as f32 * sx,
-            height: vp.height as f32 * sy,
-        })
+        let w = (x1 - x0).max(1.0);
+        let h = (y1 - y0).max(1.0);
+
+        Some(iced::Rectangle { x: x0, y: y0, width: w, height: h })
     }
 
     // ── ViewportPane helpers ──────────────────────────────────────────────

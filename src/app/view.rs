@@ -481,10 +481,11 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
     if let Some(vp_handle) = scene.active_viewport {
         let (canvas_w, canvas_h) = scene.selection.borrow().vp_size;
         if let Some(rect) = scene.viewport_screen_rect(vp_handle, (canvas_w, canvas_h)) {
-            let w = rect.width.max(1.0);
-            let h = rect.height.max(1.0);
-            let x = rect.x.max(0.0);
-            let y = rect.y.max(0.0);
+            // Clamp to canvas bounds so Space widgets never get negative size.
+            let x = rect.x.max(0.0).min(canvas_w);
+            let y = rect.y.max(0.0).min(canvas_h);
+            let w = rect.width.clamp(1.0, canvas_w - x);
+            let h = rect.height.clamp(1.0, canvas_h - y);
 
             let vp_widget = shader(PaperViewportPane::new(scene, vp_handle))
                 .width(iced::Length::Fixed(w))
@@ -500,7 +501,34 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
             .width(Fill)
             .height(Fill);
 
-            return stack![paper_sheet, positioned]
+            // Blue border drawn on top of the 3-D overlay so the viewport
+            // boundary is always visible even when the shader fills the area.
+            const VP_BORDER: Color = Color { r: 0.18, g: 0.52, b: 0.95, a: 1.0 };
+            let border_frame = container(
+                Space::new()
+                    .width(iced::Length::Fixed(w))
+                    .height(iced::Length::Fixed(h)),
+            )
+            .style(move |_: &Theme| container::Style {
+                border: iced::Border {
+                    color: VP_BORDER,
+                    width: 2.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+
+            let border_layer = column![
+                Space::new().height(iced::Length::Fixed(y)),
+                row![
+                    Space::new().width(iced::Length::Fixed(x)),
+                    border_frame,
+                ],
+            ]
+            .width(Fill)
+            .height(Fill);
+
+            return stack![paper_sheet, positioned, border_layer]
                 .width(Fill)
                 .height(Fill)
                 .into();
