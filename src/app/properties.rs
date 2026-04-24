@@ -312,7 +312,6 @@ impl H7CAD {
                 .add_entity_to_layout(entity, &layout)
             {
                 Ok(new_handle) => {
-                    // Auto-fit the new viewport to show model-space content.
                     self.tabs[i].scene.auto_fit_viewport(new_handle);
                 }
                 Err(e) => self

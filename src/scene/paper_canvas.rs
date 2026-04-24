@@ -68,9 +68,10 @@ impl<'a> canvas::Program<Message> for PaperCanvas<'a> {
         const DESK: Color = Color { r: 0.22, g: 0.24, b: 0.28, a: 1.0 };
         frame.fill_rectangle(Point::ORIGIN, bounds.size(), DESK);
 
-        // ── White paper area — use entity extents so the fill aligns with the
-        //   drawn DXF entity borders (title block frame, viewport border, etc.).
-        if let Some(((px0, py0), (px1, py1))) = self.scene.paper_entity_extents() {
+        // ── White paper area — use layout paper limits (actual paper size).
+        if let Some(((px0, py0), (px1, py1))) = self.scene.paper_limits().map(
+            |((x0, y0), (x1, y1))| ((x0 as f32, y0 as f32), (x1 as f32, y1 as f32)),
+        ) {
             let tl = to_px(px0, py1);
             let br = to_px(px1, py0);
             let pw = br.x - tl.x;

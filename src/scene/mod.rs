@@ -2246,38 +2246,6 @@ impl Scene {
         self.wires_for_block(layout_block)
     }
 
-    /// Bounding box (min_x, min_y), (max_x, max_y) of all DXF entities in the
-    /// current paper layout, in paper-space coordinates.  Used by the 2-D canvas
-    /// to position the white paper fill so it aligns with the drawn entity borders.
-    /// Falls back to `paper_limits()` when the layout has no entities.
-    pub fn paper_entity_extents(&self) -> Option<((f32, f32), (f32, f32))> {
-        let layout_block = self.current_layout_block_handle();
-        let wires = self.wires_for_block(layout_block);
-
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-
-        for wire in &wires {
-            for &[x, y, _] in &wire.points {
-                if x.is_finite() && y.is_finite() {
-                    min_x = min_x.min(x);
-                    min_y = min_y.min(y);
-                    max_x = max_x.max(x);
-                    max_y = max_y.max(y);
-                }
-            }
-        }
-
-        if min_x == f32::MAX {
-            // No entities — fall back to layout limits.
-            self.paper_limits()
-                .map(|((x0, y0), (x1, y1))| ((x0 as f32, y0 as f32), (x1 as f32, y1 as f32)))
-        } else {
-            Some(((min_x, min_y), (max_x, max_y)))
-        }
-    }
 
     /// Build a Camera oriented and scaled to match a paper-space Viewport entity.
     /// Used by `ViewportPane::Paper` to render model-space content through the
