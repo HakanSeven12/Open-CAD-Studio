@@ -79,18 +79,26 @@ re-creating thousands of buffers. Fixes mouse-movement lag in large files.
 
 ---
 
-## Option C — Parallel Tessellation (Rayon)
+## Option C — Parallel Tessellation (Rayon) ✅ Implemented
 
-**Status:** Planned
+**Status:** Done
 
-Replace the sequential `.flat_map(|e| self.tessellate_one(e))` chain in `wires_for_block()` with
-`rayon::par_iter()`.
+Extracted the body of `tessellate_one` into a free function `tessellate_entity(document, selected,
+active_viewport, e)` that takes only `Send`-safe arguments (no `&self`, no `Rc`). Added `rayon = "1"`
+to `Cargo.toml`.
+
+`wires_for_block()` now:
+1. Collects the filtered entity list into a `Vec<&EntityType>` sequentially (fast, no tessellation).
+2. Calls `rayon::into_par_iter()` on that Vec, invoking `tessellate_entity` in parallel.
+3. Flattens the results and applies the sort order via the O(1) cache from Option E.
+
+`tessellate_one` is reduced to a thin shim that delegates to `tessellate_entity` — kept for any
+remaining callers.
 
 **Impact:** Spreads tessellation across all CPU cores. Improves file-open time and post-edit
-refresh. Does **not** fix per-frame navigation lag (Option A/B address that).
+refresh. Does **not** fix per-frame navigation lag (Options A/B address that).
 
-**Difficulty:** Easy. Requires making `tessellate_one` free of interior mutability, or collecting
-into a Vec first then parallel-processing.
+**Difficulty:** Easy. Extracting the free function was the only meaningful change.
 
 ---
 

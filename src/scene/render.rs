@@ -3,7 +3,7 @@
 
 use acadrust::tables::LineType;
 use acadrust::types::{Color as AcadColor, LineWeight};
-use acadrust::{EntityType, Handle};
+use acadrust::{CadDocument, EntityType, Handle};
 use glam::Mat4;
 use iced::mouse;
 use iced::widget::shader::{self, Viewport};
@@ -157,65 +157,77 @@ impl shader::Primitive for Primitive {
 impl Scene {
     /// Returns (entity_color, pattern_length, pattern, line_weight_px, aci).
     pub(super) fn render_style(&self, e: &EntityType) -> ([f32; 4], f32, [f32; 8], f32, u8) {
-        let layer_name = &e.common().layer;
-        let (entity_color, aci) = {
-            let ec = &e.common().color;
-            let resolved = if *ec == AcadColor::ByLayer {
-                self.document
-                    .layers
-                    .get(layer_name)
-                    .map(|l| &l.color)
-                    .unwrap_or(&AcadColor::WHITE)
-            } else {
-                ec
-            };
-            let aci = match resolved {
-                AcadColor::Index(i) => *i,
-                _ => 0,
-            };
-            let [r, g, b, _] = tessellate::aci_to_rgba(resolved);
-            let alpha = 1.0 - e.common().transparency.as_percent() as f32;
-            ([r, g, b, alpha], aci)
-        };
-
-        let lt_name = self.resolved_linetype_name(e);
-        let lt_scale = e.common().linetype_scale as f32;
-        let (pattern_length, pattern) =
-            resolve_pattern(&self.document.line_types, lt_name, lt_scale);
-
-        let line_weight_px = {
-            let ew = &e.common().line_weight;
-            let resolved = match ew {
-                LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => self
-                    .document
-                    .layers
-                    .get(layer_name)
-                    .map(|l| &l.line_weight)
-                    .unwrap_or(&LineWeight::Default),
-                _ => ew,
-            };
-            const MM_TO_PX: f32 = 96.0 / 25.4;
-            resolved
-                .millimeters()
-                .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
-                .unwrap_or(1.0)
-        };
-
-        (entity_color, pattern_length, pattern, line_weight_px, aci)
+        render_style_for(&self.document, e)
     }
 
-    pub(super) fn resolved_linetype_name<'a>(&'a self, e: &'a EntityType) -> &'a str {
-        let elt = &e.common().linetype;
-        if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
-            self.document
+}
+
+// ── Document-only render-style helpers (no &self, safe to call from parallel contexts) ──
+
+/// Resolves the effective linetype name for an entity, falling back to the
+/// layer's linetype when the entity's own linetype is "ByLayer".
+pub(super) fn linetype_name_for<'a>(document: &'a CadDocument, e: &'a EntityType) -> &'a str {
+    let elt = &e.common().linetype;
+    if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
+        document
+            .layers
+            .get(&e.common().layer)
+            .map(|l| l.line_type.as_str())
+            .unwrap_or("Continuous")
+    } else {
+        elt.as_str()
+    }
+}
+
+/// Returns `(entity_color, pattern_length, pattern, line_weight_px, aci)` for
+/// an entity, resolving ByLayer/ByBlock colour and linetype from the document.
+pub(super) fn render_style_for(
+    document: &CadDocument,
+    e: &EntityType,
+) -> ([f32; 4], f32, [f32; 8], f32, u8) {
+    let layer_name = &e.common().layer;
+    let (entity_color, aci) = {
+        let ec = &e.common().color;
+        let resolved = if *ec == AcadColor::ByLayer {
+            document
                 .layers
-                .get(&e.common().layer)
-                .map(|l| l.line_type.as_str())
-                .unwrap_or("Continuous")
+                .get(layer_name)
+                .map(|l| &l.color)
+                .unwrap_or(&AcadColor::WHITE)
         } else {
-            elt.as_str()
-        }
-    }
+            ec
+        };
+        let aci = match resolved {
+            AcadColor::Index(i) => *i,
+            _ => 0,
+        };
+        let [r, g, b, _] = tessellate::aci_to_rgba(resolved);
+        let alpha = 1.0 - e.common().transparency.as_percent() as f32;
+        ([r, g, b, alpha], aci)
+    };
+
+    let lt_name = linetype_name_for(document, e);
+    let lt_scale = e.common().linetype_scale as f32;
+    let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
+
+    let line_weight_px = {
+        let ew = &e.common().line_weight;
+        let resolved = match ew {
+            LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => document
+                .layers
+                .get(layer_name)
+                .map(|l| &l.line_weight)
+                .unwrap_or(&LineWeight::Default),
+            _ => ew,
+        };
+        const MM_TO_PX: f32 = 96.0 / 25.4;
+        resolved
+            .millimeters()
+            .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
+            .unwrap_or(1.0)
+    };
+
+    (entity_color, pattern_length, pattern, line_weight_px, aci)
 }
 
 // ── Primitive builder helpers (called by ViewportPane's shader::Program impl) ──

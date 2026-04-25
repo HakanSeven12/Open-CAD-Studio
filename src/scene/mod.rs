@@ -450,7 +450,8 @@ impl Scene {
             }
         }
 
-        let mut wires: Vec<WireModel> = self.document
+        // Collect visible entities sequentially (filter needs &self).
+        let visible: Vec<&EntityType> = self.document
             .entities()
             .filter(|e| {
                 let c = e.common();
@@ -468,7 +469,16 @@ impl Scene {
                 }
                 self.belongs_to_visible_block(e.common().handle, c.owner_handle, block_handle)
             })
-            .flat_map(|e| self.tessellate_one(e))
+            .collect();
+
+        // Tessellate in parallel across all available CPU cores.
+        use rayon::prelude::*;
+        let doc = &self.document;
+        let sel = &self.selected;
+        let avp = self.active_viewport;
+        let mut wires: Vec<WireModel> = visible
+            .into_par_iter()
+            .flat_map(|e| tessellate_entity(doc, sel, avp, e))
             .collect();
 
         // Apply draw order via the cached index (O(1) block lookup).
@@ -526,119 +536,7 @@ impl Scene {
 
     /// Full tessellation pipeline for one entity.
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        let h = e.common().handle;
-        let sel = self.selected.contains(&h);
-
-        if let EntityType::Viewport(vp) = e {
-            let is_active = self.active_viewport == Some(h);
-            let is_locked = vp.status.locked;
-            let color = if sel && vp.id != 1 {
-                // Selected viewport — bright white highlight.
-                [1.0, 1.0, 1.0, 1.0]
-            } else if vp.id == 1 {
-                // Overall paper-space viewport — subtle grey.
-                [0.40, 0.40, 0.40, 1.0]
-            } else if is_active {
-                // Active (entered) viewport — bright yellow.
-                [1.0, 0.90, 0.20, 1.0]
-            } else if is_locked {
-                // Locked viewport — orange tint to indicate scale is frozen.
-                [0.90, 0.55, 0.10, 1.0]
-            } else {
-                // Normal user viewport — cyan.
-                [0.0, 0.75, 0.75, 1.0]
-            };
-            // Active viewport gets a dashed border to visually indicate MSPACE.
-            let (pattern_length, pattern) = if is_active {
-                (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
-            } else {
-                (0.0_f32, [0.0f32; 8])
-            };
-            return vec![tessellate::tessellate(
-                &self.document,
-                h,
-                e,
-                sel,
-                color,
-                pattern_length,
-                pattern,
-                1.5,
-            )];
-        }
-
-        let (entity_color, pattern_length, pattern, line_weight_px, aci) = self.render_style(e);
-        let lt_scale = e.common().linetype_scale as f32;
-        let lt_name = self.resolved_linetype_name(e);
-
-        if let EntityType::Dimension(dim) = e {
-            let mut wires = tessellate::tessellate_dimension(
-                &self.document,
-                h,
-                dim,
-                sel,
-                entity_color,
-                line_weight_px,
-            );
-            for w in &mut wires { w.aci = aci; }
-            return wires;
-        }
-
-        if let EntityType::Insert(ins) = e {
-            let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
-            return ins
-                .explode_from_document(&self.document)
-                .iter()
-                .cloned()
-                .map(crate::modules::home::modify::explode::normalize_insert_entity)
-                .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
-                .flat_map(|sub| {
-                    let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
-                        self.render_style(&sub);
-                    let mut wire = tessellate::tessellate(
-                        &self.document,
-                        h,
-                        &sub,
-                        sel,
-                        sub_color,
-                        sub_pattern_length,
-                        sub_pattern,
-                        sub_line_weight_px,
-                    );
-                    wire.name = h.value().to_string();
-                    wire.aci = sub_aci;
-                    vec![wire]
-                })
-                .collect();
-        }
-
-        let mut base = tessellate::tessellate(
-            &self.document,
-            h,
-            e,
-            sel,
-            entity_color,
-            pattern_length,
-            pattern,
-            line_weight_px,
-        );
-        base.aci = aci;
-
-        if let Some(clt) = crate::linetypes::complex_lt(lt_name) {
-            let wires = complex_lt::apply_along(
-                &base.name,
-                &base.points,
-                clt,
-                lt_scale.max(1e-4),
-                entity_color,
-                sel,
-                base.line_weight_px,
-            );
-            if !wires.is_empty() {
-                return wires;
-            }
-        }
-
-        vec![base]
+        tessellate_entity(&self.document, &self.selected, self.active_viewport, e)
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -2533,5 +2431,111 @@ fn clip_polyline_to_rect(
         result.pop();
     }
     result
+}
+
+// ── Parallel tessellation free function ──────────────────────────────────────
+//
+// Takes only the `Send + Sync` data needed for tessellation so that
+// `wires_for_block` can dispatch work across rayon's thread pool without
+// requiring `Scene` (which contains `Rc<RefCell<...>>` and is `!Send`) to
+// cross thread boundaries.
+
+fn tessellate_entity(
+    document: &acadrust::CadDocument,
+    selected: &HashSet<Handle>,
+    active_viewport: Option<Handle>,
+    e: &EntityType,
+) -> Vec<WireModel> {
+    let h = e.common().handle;
+    let sel = selected.contains(&h);
+
+    if let EntityType::Viewport(vp) = e {
+        let is_active = active_viewport == Some(h);
+        let is_locked = vp.status.locked;
+        let color = if sel && vp.id != 1 {
+            [1.0, 1.0, 1.0, 1.0]
+        } else if vp.id == 1 {
+            [0.40, 0.40, 0.40, 1.0]
+        } else if is_active {
+            [1.0, 0.90, 0.20, 1.0]
+        } else if is_locked {
+            [0.90, 0.55, 0.10, 1.0]
+        } else {
+            [0.0, 0.75, 0.75, 1.0]
+        };
+        let (pattern_length, pattern) = if is_active {
+            (1.5_f32, [0.8, -0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0_f32])
+        } else {
+            (0.0_f32, [0.0f32; 8])
+        };
+        return vec![tessellate::tessellate(
+            document, h, e, sel, color, pattern_length, pattern, 1.5,
+        )];
+    }
+
+    let (entity_color, pattern_length, pattern, line_weight_px, aci) =
+        render::render_style_for(document, e);
+    let lt_scale = e.common().linetype_scale as f32;
+    let lt_name = render::linetype_name_for(document, e);
+
+    if let EntityType::Dimension(dim) = e {
+        let mut wires = tessellate::tessellate_dimension(
+            document, h, dim, sel, entity_color, line_weight_px,
+        );
+        for w in &mut wires {
+            w.aci = aci;
+        }
+        return wires;
+    }
+
+    if let EntityType::Insert(ins) = e {
+        let is_mirrored = ins.x_scale() * ins.y_scale() < 0.0;
+        return ins
+            .explode_from_document(document)
+            .iter()
+            .cloned()
+            .map(crate::modules::home::modify::explode::normalize_insert_entity)
+            .map(|sub| crate::modules::home::modify::explode::fix_mirrored_arc(sub, is_mirrored))
+            .flat_map(|sub| {
+                let (sub_color, sub_pattern_length, sub_pattern, sub_line_weight_px, sub_aci) =
+                    render::render_style_for(document, &sub);
+                let mut wire = tessellate::tessellate(
+                    document,
+                    h,
+                    &sub,
+                    sel,
+                    sub_color,
+                    sub_pattern_length,
+                    sub_pattern,
+                    sub_line_weight_px,
+                );
+                wire.name = h.value().to_string();
+                wire.aci = sub_aci;
+                vec![wire]
+            })
+            .collect();
+    }
+
+    let mut base = tessellate::tessellate(
+        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px,
+    );
+    base.aci = aci;
+
+    if let Some(clt) = crate::linetypes::complex_lt(lt_name) {
+        let wires = complex_lt::apply_along(
+            &base.name,
+            &base.points,
+            clt,
+            lt_scale.max(1e-4),
+            entity_color,
+            sel,
+            base.line_weight_px,
+        );
+        if !wires.is_empty() {
+            return wires;
+        }
+    }
+
+    vec![base]
 }
 
