@@ -11,6 +11,7 @@ pub mod step;
 pub mod stl;
 pub mod xref;
 
+use acadrust::entities::{Dimension, EntityType};
 use acadrust::io::dwg::DwgReader;
 use acadrust::{CadDocument, DwgWriter, DxfReader, DxfWriter};
 use std::path::{Path, PathBuf};
@@ -60,10 +61,14 @@ pub fn load_file(path: &Path) -> Result<CadDocument, String> {
             let mut reader = DwgReader::from_file(path).map_err(|e| e.to_string())?;
             reader.read().map_err(|e| e.to_string())
         }
-        "dxf" => DxfReader::from_file(path)
-            .map_err(|e| e.to_string())?
-            .read()
-            .map_err(|e| e.to_string()),
+        "dxf" => {
+            let mut doc = DxfReader::from_file(path)
+                .map_err(|e| e.to_string())?
+                .read()
+                .map_err(|e| e.to_string())?;
+            fix_dxf_dimension_rotations(&mut doc);
+            Ok(doc)
+        }
         _ => Err(format!("Unsupported file format: .{ext}")),
     }
 }
@@ -161,4 +166,17 @@ pub fn save_dxf(doc: &CadDocument, path: &Path) -> Result<(), String> {
     DxfWriter::new(doc)
         .write_to_file(path)
         .map_err(|e| e.to_string())
+}
+
+// ── DXF post-load fixups ──────────────────────────────────────────────────
+
+/// The acadrust DXF reader stores LinearDimension.rotation directly from DXF
+/// group code 50, which is in degrees.  DWG and our own dimension-creation code
+/// store it in radians.  Convert so tessellation can call cos/sin uniformly.
+fn fix_dxf_dimension_rotations(doc: &mut CadDocument) {
+    for entity in doc.entities_mut() {
+        if let EntityType::Dimension(Dimension::Linear(d)) = entity {
+            d.rotation = d.rotation.to_radians();
+        }
+    }
 }

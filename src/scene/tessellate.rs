@@ -707,9 +707,9 @@ fn append_linear_dimension(
     axis: Vec3,
 ) {
     let perp = Vec3::new(-axis.y, axis.x, 0.0);
-    let offset = (def - first).dot(perp);
-    let d1 = first + perp * offset;
-    let d2 = second + perp * offset;
+    let dim_line_pos = def.dot(perp);
+    let d1 = first + perp * (dim_line_pos - first.dot(perp));
+    let d2 = second + perp * (dim_line_pos - second.dot(perp));
     add_segment(points, first, d1);
     add_segment(points, second, d2);
     add_segment(points, d1, d2);
