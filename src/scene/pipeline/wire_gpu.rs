@@ -119,8 +119,7 @@ impl WireGpu {
     }
 
     /// Creates a ghost copy with `alpha` applied on top of the wire's own alpha.
-    /// Used for the X-ray pass: selected wires rendered at reduced opacity through
-    /// occluding geometry.
+    #[allow(dead_code)]
     pub fn new_ghost(device: &wgpu::Device, wire: &WireModel, alpha: f32) -> Self {
         let [r, g, b, a] = wire.color;
         Self::build(device, wire, [r, g, b, a * alpha])

@@ -123,6 +123,9 @@ pub struct Scene {
     pub bg_color: [f32; 4],
     /// Custom paper-space background fill color for Wipeout entities.
     pub paper_bg_color: [f32; 4],
+    /// Scene centroid subtracted from all coordinates before f32 conversion.
+    /// Eliminates f32 precision loss at large world coordinates (e.g. UTM 4,000,000 m).
+    pub world_offset: [f64; 3],
 }
 
 impl Scene {
@@ -153,11 +156,32 @@ impl Scene {
             active_viewport: None,
             bg_color: [0.11, 0.11, 0.11, 1.0],
             paper_bg_color: [1.0, 1.0, 1.0, 1.0],
+            world_offset: [0.0; 3],
         }
     }
 
     pub fn bump_geometry(&mut self) {
         self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Compute scene centroid from DXF header extents and store as world_offset.
+    /// Must be called after `self.document` is set so all geometry is offset-corrected.
+    pub fn compute_and_set_world_offset(&mut self) {
+        let h = &self.document.header;
+        let min = h.model_space_extents_min;
+        let max = h.model_space_extents_max;
+        // Sentinel: DXF files with no geometry have EXTMIN = 1e20, EXTMAX = -1e20.
+        // Fall back to no offset so the scene stays at the origin.
+        let valid = min.x < max.x && min.y < max.y;
+        self.world_offset = if valid {
+            [
+                (min.x + max.x) * 0.5,
+                (min.y + max.y) * 0.5,
+                (min.z + max.z) * 0.5,
+            ]
+        } else {
+            [0.0; 3]
+        };
     }
 
     /// Public accessor for the block-record handle of the current layout.
@@ -582,9 +606,10 @@ impl Scene {
         let doc = &self.document;
         let sel = &self.selected;
         let avp = self.active_viewport;
+        let woff = self.world_offset;
         let mut wires: Vec<WireModel> = visible
             .into_par_iter()
-            .flat_map(|e| tessellate_entity(doc, sel, avp, e))
+            .flat_map(|e| tessellate_entity(doc, sel, avp, woff, e))
             .collect();
 
         // Apply draw order via the cached index (O(1) block lookup).
@@ -642,7 +667,7 @@ impl Scene {
 
     /// Full tessellation pipeline for one entity.
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        tessellate_entity(&self.document, &self.selected, self.active_viewport, e)
+        tessellate_entity(&self.document, &self.selected, self.active_viewport, self.world_offset, e)
     }
 
     fn model_space_block_handle(&self) -> Handle {
@@ -2638,6 +2663,7 @@ fn tessellate_entity(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
+    world_offset: [f64; 3],
     e: &EntityType,
 ) -> Vec<WireModel> {
     let h = e.common().handle;
@@ -2663,9 +2689,9 @@ fn tessellate_entity(
             (0.0_f32, [0.0f32; 8])
         };
         let mut wire = tessellate::tessellate(
-            document, h, e, sel, color, pattern_length, pattern, 1.5,
+            document, h, e, sel, color, pattern_length, pattern, 1.5, world_offset,
         );
-        wire.aabb = entity_aabb(e);
+        wire.aabb = entity_aabb(e, world_offset);
         return vec![wire];
     }
 
@@ -2675,9 +2701,9 @@ fn tessellate_entity(
     let lt_name = render::linetype_name_for(document, e);
 
     if let EntityType::Dimension(dim) = e {
-        let aabb = entity_aabb(e);
+        let aabb = entity_aabb(e, world_offset);
         let mut wires = tessellate::tessellate_dimension(
-            document, h, dim, sel, entity_color, line_weight_px,
+            document, h, dim, sel, entity_color, line_weight_px, world_offset,
         );
         for w in &mut wires {
             w.aci = aci;
@@ -2703,7 +2729,7 @@ fn tessellate_entity(
                         document, &sub,
                         ins_color, ins_pat_len, ins_pat, ins_lw_px,
                     );
-                let sub_aabb = entity_aabb(&sub);
+                let sub_aabb = entity_aabb(&sub, world_offset);
                 let mut wire = tessellate::tessellate(
                     document,
                     h,
@@ -2713,6 +2739,7 @@ fn tessellate_entity(
                     sub_pattern_length,
                     sub_pattern,
                     sub_line_weight_px,
+                    world_offset,
                 );
                 wire.name = h.value().to_string();
                 wire.aci = sub_aci;
@@ -2722,9 +2749,9 @@ fn tessellate_entity(
             .collect();
     }
 
-    let aabb = entity_aabb(e);
+    let aabb = entity_aabb(e, world_offset);
     let mut base = tessellate::tessellate(
-        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px,
+        document, h, e, sel, entity_color, pattern_length, pattern, line_weight_px, world_offset,
     );
     base.aci = aci;
     base.aabb = aabb;
@@ -2748,15 +2775,16 @@ fn tessellate_entity(
     vec![base]
 }
 
-fn entity_aabb(e: &acadrust::EntityType) -> [f32; 4] {
+fn entity_aabb(e: &acadrust::EntityType, world_offset: [f64; 3]) -> [f32; 4] {
     let bbox = e.as_entity().bounding_box();
-    let min_x = bbox.min.x as f32;
-    let min_y = bbox.min.y as f32;
-    let max_x = bbox.max.x as f32;
-    let max_y = bbox.max.y as f32;
+    let [ox, oy, _] = world_offset;
+    let min_x = (bbox.min.x - ox) as f32;
+    let min_y = (bbox.min.y - oy) as f32;
+    let max_x = (bbox.max.x - ox) as f32;
+    let max_y = (bbox.max.y - oy) as f32;
     // A degenerate box (min == max == 0) means bounding_box() returned Default —
     // use UNBOUNDED so the wire is never wrongly pre-rejected.
-    if min_x == 0.0 && min_y == 0.0 && max_x == 0.0 && max_y == 0.0 {
+    if min_x == max_x && min_y == max_y {
         return WireModel::UNBOUNDED_AABB;
     }
     [min_x, min_y, max_x, max_y]

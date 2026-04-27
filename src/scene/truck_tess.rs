@@ -37,16 +37,26 @@ pub enum TruckTessResult {
     },
 }
 
+// ── Shared offset helper ──────────────────────────────────────────────────
+
+/// Convert a truck f64 point to local f32 by subtracting world_offset in f64
+/// before truncating.  This preserves sub-unit decimal precision even when the
+/// raw world coordinates are in the millions (e.g. Turkish UTM).
+#[inline]
+fn to_local(x: f64, y: f64, z: f64, off: [f64; 3]) -> [f32; 3] {
+    [(x - off[0]) as f32, (y - off[1]) as f32, (z - off[2]) as f32]
+}
+
 // ── Vertex ────────────────────────────────────────────────────────────────
 
-pub fn tessellate_vertex(v: &Vertex) -> TruckTessResult {
+pub fn tessellate_vertex(v: &Vertex, offset: [f64; 3]) -> TruckTessResult {
     let p = v.point();
-    TruckTessResult::Point([p.x as f32, p.y as f32, p.z as f32])
+    TruckTessResult::Point(to_local(p.x, p.y, p.z, offset))
 }
 
 // ── Edge ──────────────────────────────────────────────────────────────────
 
-pub fn tessellate_edge(e: &Edge) -> TruckTessResult {
+pub fn tessellate_edge(e: &Edge, offset: [f64; 3]) -> TruckTessResult {
     // oriented_curve() respects the edge direction (inverts if needed).
     let curve = e.oriented_curve();
     let (t0, t1) = curve.range_tuple();
@@ -55,17 +65,17 @@ pub fn tessellate_edge(e: &Edge) -> TruckTessResult {
     let (_, pts) = curve.parameter_division((t0, t1), CURVE_TOL);
     let lines = pts
         .iter()
-        .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+        .map(|p| to_local(p.x, p.y, p.z, offset))
         .collect();
     TruckTessResult::Lines(lines)
 }
 
 // ── Wire ──────────────────────────────────────────────────────────────────
 
-pub fn tessellate_wire(w: &Wire) -> TruckTessResult {
+pub fn tessellate_wire(w: &Wire, offset: [f64; 3]) -> TruckTessResult {
     let mut pts: Vec<[f32; 3]> = Vec::new();
     for edge in w.edge_iter() {
-        if let TruckTessResult::Lines(ep) = tessellate_edge(edge) {
+        if let TruckTessResult::Lines(ep) = tessellate_edge(edge, offset) {
             if pts.is_empty() {
                 pts = ep;
             } else {
@@ -81,17 +91,17 @@ pub fn tessellate_wire(w: &Wire) -> TruckTessResult {
 // ── Shell ─────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
-pub fn tessellate_shell(s: &Shell) -> TruckTessResult {
+pub fn tessellate_shell(s: &Shell, offset: [f64; 3]) -> TruckTessResult {
     let meshed = s.triangulation(MESH_TOL);
-    polygon_to_result(meshed.to_polygon())
+    polygon_to_result(meshed.to_polygon(), offset)
 }
 
 // ── Solid ─────────────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
-pub fn tessellate_solid(s: &Solid) -> TruckTessResult {
+pub fn tessellate_solid(s: &Solid, offset: [f64; 3]) -> TruckTessResult {
     let meshed = s.triangulation(MESH_TOL);
-    polygon_to_result(meshed.to_polygon())
+    polygon_to_result(meshed.to_polygon(), offset)
 }
 
 // ── MeshModel helper ──────────────────────────────────────────────────────
@@ -122,11 +132,11 @@ pub fn tess_to_mesh_model(
 
 // ── Internal ─────────────────────────────────────────────────────────────
 
-fn polygon_to_result(mesh: PolygonMesh) -> TruckTessResult {
+fn polygon_to_result(mesh: PolygonMesh, offset: [f64; 3]) -> TruckTessResult {
     let verts: Vec<[f32; 3]> = mesh
         .positions()
         .iter()
-        .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+        .map(|p| to_local(p.x, p.y, p.z, offset))
         .collect();
 
     // Per-vertex normals: if the mesh has normals, map each triangle vertex's

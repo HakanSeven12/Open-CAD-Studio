@@ -25,7 +25,7 @@ use crate::scene::truck_tess;
 // ── Tessellation helper ────────────────────────────────────────────────────
 
 fn solid_to_mesh(solid: &truck_modeling::Solid, color: [f32; 4], name: &str) -> Option<MeshModel> {
-    match truck_tess::tessellate_solid(solid) {
+    match truck_tess::tessellate_solid(solid, [0.0; 3]) {
         truck_tess::TruckTessResult::Mesh { verts, normals, indices } => Some(MeshModel {
             name: name.to_string(),
             verts, normals, indices,
@@ -37,7 +37,7 @@ fn solid_to_mesh(solid: &truck_modeling::Solid, color: [f32; 4], name: &str) -> 
 }
 
 fn shell_to_mesh(shell: &truck_modeling::Shell, color: [f32; 4], name: &str) -> Option<MeshModel> {
-    match truck_tess::tessellate_shell(shell) {
+    match truck_tess::tessellate_shell(shell, [0.0; 3]) {
         truck_tess::TruckTessResult::Mesh { verts, normals, indices } => Some(MeshModel {
             name: name.to_string(),
             verts, normals, indices,

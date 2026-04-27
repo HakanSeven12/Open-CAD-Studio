@@ -51,6 +51,7 @@ pub fn tessellate(
     pattern_length: f32,
     pattern: [f32; 8],
     line_weight_px: f32,
+    world_offset: [f64; 3],
 ) -> WireModel {
     let color = if selected {
         WireModel::SELECTED
@@ -102,7 +103,7 @@ pub fn tessellate(
 
             // ── Standard topology objects ─────────────────────────────────
             TruckObject::Point(v) => {
-                let result = tessellate_vertex(&v);
+                let result = tessellate_vertex(&v, world_offset);
                 match result {
                     TruckTessResult::Point([x, y, z]) => {
                         let s = 0.1_f32;
@@ -131,7 +132,7 @@ pub fn tessellate(
             }
 
             TruckObject::Curve(e) => {
-                if let TruckTessResult::Lines(points) = tessellate_edge(&e) {
+                if let TruckTessResult::Lines(points) = tessellate_edge(&e, world_offset) {
                     return WireModel {
                         name,
                         points,
@@ -150,7 +151,7 @@ pub fn tessellate(
             }
 
             TruckObject::Contour(w) => {
-                if let TruckTessResult::Lines(points) = tessellate_wire(&w) {
+                if let TruckTessResult::Lines(points) = tessellate_wire(&w, world_offset) {
                     return WireModel {
                         name,
                         points,
@@ -190,14 +191,14 @@ pub fn tessellate(
                 // As a wire fallback, render the pre-computed edge wires
                 // stored in the entity when present (e.g. from SOLVIEW output
                 // or when the SAT kernel cannot parse the ACIS data).
-                let wire_pts = solid_wire_fallback(entity);
+                let wire_pts = solid_wire_fallback(entity, world_offset);
                 return WireModel::solid(name, wire_pts, color, selected);
             }
         }
     }
 
     // ── Legacy fallback for Viewport and other unhandled types ────────────
-    let (points, snap_pts, tangent_geoms, key_vertices) = legacy_geometry(entity);
+    let (points, snap_pts, tangent_geoms, key_vertices) = legacy_geometry(entity, world_offset);
     WireModel {
         name,
         points,
@@ -221,6 +222,7 @@ pub fn tessellate_dimension(
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
+    world_offset: [f64; 3],
 ) -> Vec<WireModel> {
     let color = if selected {
         WireModel::SELECTED
@@ -243,7 +245,7 @@ pub fn tessellate_dimension(
             )
         })
         .unwrap_or((0.12, 0.0, 0.0));
-    let points = dimension_geometry(dim, arrow_size, dimexo, dimexe);
+    let points = dimension_geometry(dim, arrow_size, dimexo, dimexe, world_offset);
     let key_vertices = points
         .iter()
         .copied()
@@ -275,6 +277,7 @@ pub fn tessellate_dimension(
             0.0,
             [0.0; 8],
             line_weight_px,
+            world_offset,
         );
         wire.name = name;
         wires.push(wire);
@@ -390,13 +393,15 @@ fn tessellate_multileader(
     selected: bool,
     entity_color: [f32; 4],
     line_weight_px: f32,
+    world_offset: [f64; 3],
 ) -> Vec<WireModel> {
     let color = if selected { WireModel::SELECTED } else { entity_color };
     let name = handle.value().to_string();
     let nan = [f32::NAN; 3];
 
+    let [ox, oy, oz] = world_offset;
     let to_f32 = |v: &acadrust::types::Vector3| -> [f32; 3] {
-        [v.x as f32, v.y as f32, v.z as f32]
+        [(v.x - ox) as f32, (v.y - oy) as f32, (v.z - oz) as f32]
     };
 
     let arrow_size = ml.arrowhead_size as f32;
@@ -462,9 +467,9 @@ fn tessellate_multileader(
             let dlen = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-9);
             let dl = ml.dogleg_length;
             let end = [
-                (cp.x + dir.x / dlen * dl) as f32,
-                (cp.y + dir.y / dlen * dl) as f32,
-                cp.z as f32,
+                (cp.x + dir.x / dlen * dl - ox) as f32,
+                (cp.y + dir.y / dlen * dl - oy) as f32,
+                (cp.z - oz) as f32,
             ];
             points.push(nan);
             points.push(cp_f);
@@ -502,7 +507,7 @@ fn tessellate_multileader(
         mtext.common.layer = ml.common.layer.clone();
         let mut w = tessellate(
             document, handle, &EntityType::MText(mtext),
-            selected, entity_color, 0.0, [0.0; 8], line_weight_px,
+            selected, entity_color, 0.0, [0.0; 8], line_weight_px, world_offset,
         );
         w.name = name;
         wires.push(w);
@@ -519,10 +524,11 @@ pub fn tessellate_mesh(
     entity: &EntityType,
     selected: bool,
     color: [f32; 4],
+    world_offset: [f64; 3],
 ) -> Option<MeshModel> {
     let te = convert(entity, document)?;
     let result = match te.object {
-        TruckObject::Volume(solid) => tessellate_solid(&solid),
+        TruckObject::Volume(solid) => tessellate_solid(&solid, world_offset),
         _ => return None,
     };
     truck_tess::tess_to_mesh_model(
@@ -553,12 +559,13 @@ type Geometry = (
     Vec<[f32; 3]>,
 );
 
-fn legacy_geometry(entity: &EntityType) -> Geometry {
+fn legacy_geometry(entity: &EntityType, world_offset: [f64; 3]) -> Geometry {
+    let [ox, oy, oz] = world_offset;
     match entity {
         EntityType::Viewport(vp) => {
-            let cx = vp.center.x as f32;
-            let cy = vp.center.y as f32;
-            let cz = vp.center.z as f32;
+            let cx = (vp.center.x - ox) as f32;
+            let cy = (vp.center.y - oy) as f32;
+            let cz = (vp.center.z - oz) as f32;
             let hw = (vp.width / 2.0) as f32;
             let hh = (vp.height / 2.0) as f32;
             let pts = vec![
@@ -572,9 +579,9 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
         }
         EntityType::Insert(ins) => {
             let ip = Vec3::new(
-                ins.insert_point.x as f32,
-                ins.insert_point.y as f32,
-                ins.insert_point.z as f32,
+                (ins.insert_point.x - ox) as f32,
+                (ins.insert_point.y - oy) as f32,
+                (ins.insert_point.z - oz) as f32,
             );
             let s = 0.1_f32;
             let pts = vec![
@@ -586,7 +593,7 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
             (pts, vec![(ip, SnapHint::Insertion)], vec![], vec![])
         }
         EntityType::Hatch(h) => {
-            let elev = h.elevation as f32;
+            let elev = (h.elevation - oz) as f32;
             let mut pts: Vec<[f32; 3]> = Vec::new();
             let mut key_verts: Vec<[f32; 3]> = Vec::new();
             for path in &h.paths {
@@ -595,7 +602,7 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
                         acadrust::entities::BoundaryEdge::Polyline(poly) => {
                             let start_idx = pts.len();
                             for v in &poly.vertices {
-                                let p = [v.x as f32, v.y as f32, elev];
+                                let p = [(v.x - ox) as f32, (v.y - oy) as f32, elev];
                                 pts.push(p);
                                 key_verts.push(p);
                             }
@@ -604,8 +611,8 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
                             }
                         }
                         acadrust::entities::BoundaryEdge::Line(ln) => {
-                            let p0 = [ln.start.x as f32, ln.start.y as f32, elev];
-                            let p1 = [ln.end.x as f32, ln.end.y as f32, elev];
+                            let p0 = [(ln.start.x - ox) as f32, (ln.start.y - oy) as f32, elev];
+                            let p1 = [(ln.end.x - ox) as f32, (ln.end.y - oy) as f32, elev];
                             pts.push(p0);
                             pts.push(p1);
                             key_verts.push(p0);
@@ -623,11 +630,11 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
         EntityType::Ole2Frame(ole) => {
             // OLE objects carry a bounding rectangle in model space.
             // Render a simple X-through-rectangle placeholder.
-            let x0 = ole.upper_left_corner.x as f32;
-            let y0 = ole.lower_right_corner.y as f32;
-            let x1 = ole.lower_right_corner.x as f32;
-            let y1 = ole.upper_left_corner.y as f32;
-            let z  = ole.upper_left_corner.z as f32;
+            let x0 = (ole.upper_left_corner.x - ox) as f32;
+            let y0 = (ole.lower_right_corner.y - oy) as f32;
+            let x1 = (ole.lower_right_corner.x - ox) as f32;
+            let y1 = (ole.upper_left_corner.y - oy) as f32;
+            let z  = (ole.upper_left_corner.z - oz) as f32;
             if (x1 - x0).abs() < 1e-6 && (y1 - y0).abs() < 1e-6 {
                 // Degenerate / unknown size — show a small cross.
                 let s = 0.5_f32;
@@ -656,7 +663,8 @@ fn legacy_geometry(entity: &EntityType) -> Geometry {
 /// AutoCAD stores explicit wire geometry (from SOLVIEW / 3DPLOT) alongside the
 /// ACIS data.  We use this as a visible fallback when the SAT tessellator
 /// produces no mesh (e.g. binary SAB data or unsupported geometry).
-fn solid_wire_fallback(entity: &EntityType) -> Vec<[f32; 3]> {
+fn solid_wire_fallback(entity: &EntityType, world_offset: [f64; 3]) -> Vec<[f32; 3]> {
+    let [ox, oy, oz] = world_offset;
     let wires: &[acadrust::entities::Wire] = match entity {
         EntityType::Solid3D(s) => &s.wires,
         EntityType::Region(r)  => &r.wires,
@@ -673,12 +681,8 @@ fn solid_wire_fallback(entity: &EntityType) -> Vec<[f32; 3]> {
         if wire.points.len() < 2 {
             continue;
         }
-        for (i, v) in wire.points.iter().enumerate() {
-            if i > 0 {
-                // Connect segments: repeat previous point then add current so
-                // the wire renderer draws a continuous polyline per wire.
-            }
-            pts.push([v.x as f32, v.y as f32, v.z as f32]);
+        for v in &wire.points {
+            pts.push([(v.x - ox) as f32, (v.y - oy) as f32, (v.z - oz) as f32]);
         }
         // NaN sentinel separates distinct wire segments.
         pts.push([f32::NAN, f32::NAN, f32::NAN]);
@@ -686,34 +690,41 @@ fn solid_wire_fallback(entity: &EntityType) -> Vec<[f32; 3]> {
     pts
 }
 
-fn dimension_geometry(dim: &Dimension, arrow_size: f32, dimexo: f32, dimexe: f32) -> Vec<[f32; 3]> {
+fn dimension_geometry(
+    dim: &Dimension,
+    arrow_size: f32,
+    dimexo: f32,
+    dimexe: f32,
+    world_offset: [f64; 3],
+) -> Vec<[f32; 3]> {
+    let lv = |v| vec3_local(v, world_offset);
     let mut points = Vec::new();
     match dim {
         Dimension::Aligned(d) => {
-            let first = vec3(d.first_point);
-            let second = vec3(d.second_point);
-            let def = vec3(d.definition_point);
+            let first = lv(d.first_point);
+            let second = lv(d.second_point);
+            let def = lv(d.definition_point);
             let axis = normalized_or(second - first, Vec3::X);
             append_linear_dimension(&mut points, first, second, def, axis, arrow_size, dimexo, dimexe);
         }
         Dimension::Linear(d) => {
-            let first = vec3(d.first_point);
-            let second = vec3(d.second_point);
-            let def = vec3(d.definition_point);
+            let first = lv(d.first_point);
+            let second = lv(d.second_point);
+            let def = lv(d.definition_point);
             let axis = Vec3::new(d.rotation.cos() as f32, d.rotation.sin() as f32, 0.0);
             append_linear_dimension(&mut points, first, second, def, normalized_or(axis, Vec3::X), arrow_size, dimexo, dimexe);
         }
         Dimension::Radius(d) => {
-            let center = vec3(d.angle_vertex);
-            let point = vec3(d.definition_point);
-            let text = dimension_text_position(dim);
+            let center = lv(d.angle_vertex);
+            let point = lv(d.definition_point);
+            let text = dimension_text_position(dim, world_offset);
             add_segment(&mut points, center, point);
             add_segment(&mut points, point, text);
             append_arrow(&mut points, point, normalized_or(center - point, Vec3::X), arrow_size);
         }
         Dimension::Diameter(d) => {
-            let p1 = vec3(d.angle_vertex);
-            let p2 = vec3(d.definition_point);
+            let p1 = lv(d.angle_vertex);
+            let p2 = lv(d.definition_point);
             add_segment(&mut points, p1, p2);
             append_arrow(&mut points, p1, normalized_or(p2 - p1, Vec3::X), arrow_size);
             append_arrow(&mut points, p2, normalized_or(p1 - p2, Vec3::X), arrow_size);
@@ -721,26 +732,26 @@ fn dimension_geometry(dim: &Dimension, arrow_size: f32, dimexo: f32, dimexe: f32
         Dimension::Angular2Ln(d) => {
             append_angular_dimension(
                 &mut points,
-                vec3(d.angle_vertex),
-                vec3(d.first_point),
-                vec3(d.second_point),
-                vec3(d.dimension_arc),
+                lv(d.angle_vertex),
+                lv(d.first_point),
+                lv(d.second_point),
+                lv(d.dimension_arc),
                 arrow_size,
             );
         }
         Dimension::Angular3Pt(d) => {
             append_angular_dimension(
                 &mut points,
-                vec3(d.angle_vertex),
-                vec3(d.first_point),
-                vec3(d.second_point),
-                vec3(d.definition_point),
+                lv(d.angle_vertex),
+                lv(d.first_point),
+                lv(d.second_point),
+                lv(d.definition_point),
                 arrow_size,
             );
         }
         Dimension::Ordinate(d) => {
-            add_segment(&mut points, vec3(d.feature_location), vec3(d.definition_point));
-            add_segment(&mut points, vec3(d.definition_point), vec3(d.leader_endpoint));
+            add_segment(&mut points, lv(d.feature_location), lv(d.definition_point));
+            add_segment(&mut points, lv(d.definition_point), lv(d.leader_endpoint));
         }
     }
     points
@@ -859,18 +870,17 @@ fn add_polyline(points: &mut Vec<[f32; 3]>, polyline: &[Vec3]) {
 
 fn dimension_text_entity(dim: &Dimension) -> Option<Text> {
     let value = dimension_text_value(dim)?;
-    let pos = dimension_text_position(dim);
+    // Use f64 position directly to avoid f32 round-trip precision loss at large
+    // coordinates (e.g. Turkish UTM ~4,000,000 m). tessellate() will apply
+    // world_offset when rendering this synthetic Text entity.
+    let pos_f64 = dimension_text_pos_f64(dim);
     let base = dim.base();
-    // acadrust's DXF reader never parses group code 53 (text rotation), so
-    // base.text_rotation is always 0 for DXF files.  Fall back to the natural
-    // axis-aligned rotation derived from geometry; only use the stored value
-    // when it represents a genuine user override (non-zero).
     let rotation = if base.text_rotation.abs() > 1e-9 {
         base.text_rotation
     } else {
         dimension_text_natural_rotation(dim)
     };
-    let mut text = Text::with_value(value, Vector3::new(pos.x as f64, pos.y as f64, pos.z as f64))
+    let mut text = Text::with_value(value, pos_f64)
         .with_height(dimension_text_height(dim))
         .with_rotation(rotation);
     text.style = base.style_name.clone();
@@ -919,20 +929,21 @@ fn dimension_text_value(dim: &Dimension) -> Option<String> {
     })
 }
 
-fn dimension_text_position(dim: &Dimension) -> Vec3 {
+fn dimension_text_position(dim: &Dimension, world_offset: [f64; 3]) -> Vec3 {
+    let lv = |v| vec3_local(v, world_offset);
     let base = dim.base();
-    let pos = vec3(base.text_middle_point);
+    let pos = lv(base.text_middle_point);
     if pos.length_squared() > 1e-8 {
         return pos;
     }
     match dim {
-        Dimension::Aligned(d) => (vec3(d.first_point) + vec3(d.second_point)) * 0.5,
-        Dimension::Linear(d) => (vec3(d.first_point) + vec3(d.second_point)) * 0.5,
-        Dimension::Radius(d) => (vec3(d.angle_vertex) + vec3(d.definition_point)) * 0.5,
-        Dimension::Diameter(d) => (vec3(d.angle_vertex) + vec3(d.definition_point)) * 0.5,
-        Dimension::Angular2Ln(d) => vec3(d.dimension_arc),
-        Dimension::Angular3Pt(d) => vec3(d.definition_point),
-        Dimension::Ordinate(d) => vec3(d.leader_endpoint),
+        Dimension::Aligned(d) => (lv(d.first_point) + lv(d.second_point)) * 0.5,
+        Dimension::Linear(d) => (lv(d.first_point) + lv(d.second_point)) * 0.5,
+        Dimension::Radius(d) => (lv(d.angle_vertex) + lv(d.definition_point)) * 0.5,
+        Dimension::Diameter(d) => (lv(d.angle_vertex) + lv(d.definition_point)) * 0.5,
+        Dimension::Angular2Ln(d) => lv(d.dimension_arc),
+        Dimension::Angular3Pt(d) => lv(d.definition_point),
+        Dimension::Ordinate(d) => lv(d.leader_endpoint),
     }
 }
 
@@ -941,8 +952,43 @@ fn dimension_text_height(dim: &Dimension) -> f64 {
     if scale.is_finite() { scale } else { 0.25 }
 }
 
-fn vec3(v: Vector3) -> Vec3 {
-    Vec3::new(v.x as f32, v.y as f32, v.z as f32)
+fn vec3_local(v: Vector3, off: [f64; 3]) -> Vec3 {
+    Vec3::new((v.x - off[0]) as f32, (v.y - off[1]) as f32, (v.z - off[2]) as f32)
+}
+
+/// Returns the text position of a dimension in DXF world-space (f64, no offset applied).
+/// Used when building a synthetic Text entity so tessellate() can apply world_offset itself.
+fn dimension_text_pos_f64(dim: &Dimension) -> Vector3 {
+    let base = dim.base();
+    let p = base.text_middle_point;
+    if p.x * p.x + p.y * p.y + p.z * p.z > 1e-16 {
+        return p;
+    }
+    match dim {
+        Dimension::Aligned(d) => Vector3::new(
+            (d.first_point.x + d.second_point.x) * 0.5,
+            (d.first_point.y + d.second_point.y) * 0.5,
+            (d.first_point.z + d.second_point.z) * 0.5,
+        ),
+        Dimension::Linear(d) => Vector3::new(
+            (d.first_point.x + d.second_point.x) * 0.5,
+            (d.first_point.y + d.second_point.y) * 0.5,
+            (d.first_point.z + d.second_point.z) * 0.5,
+        ),
+        Dimension::Radius(d) => Vector3::new(
+            (d.angle_vertex.x + d.definition_point.x) * 0.5,
+            (d.angle_vertex.y + d.definition_point.y) * 0.5,
+            (d.angle_vertex.z + d.definition_point.z) * 0.5,
+        ),
+        Dimension::Diameter(d) => Vector3::new(
+            (d.angle_vertex.x + d.definition_point.x) * 0.5,
+            (d.angle_vertex.y + d.definition_point.y) * 0.5,
+            (d.angle_vertex.z + d.definition_point.z) * 0.5,
+        ),
+        Dimension::Angular2Ln(d) => d.dimension_arc,
+        Dimension::Angular3Pt(d) => d.definition_point,
+        Dimension::Ordinate(d) => d.leader_endpoint,
+    }
 }
 
 fn normalized_or(v: Vec3, fallback: Vec3) -> Vec3 {
