@@ -61,7 +61,7 @@ pub struct Pipeline {
     gpu_meshes: Vec<MeshGpu>,
     /// Batched 3DFACE fill (all faces in one buffer) and edges (merged wire).
     gpu_face3d_fill: Option<Face3DGpu>,
-    gpu_face3d_edges: Option<WireGpu>,
+    gpu_face3d_edges: Vec<WireGpu>,
     pub viewcube: ViewCubePipeline,
     /// Last geometry epoch for which GPU buffers were uploaded.
     /// Initialized to u64::MAX so the first frame always uploads.
@@ -590,7 +590,7 @@ impl Pipeline {
             gpu_images: vec![],
             gpu_meshes: vec![],
             gpu_face3d_fill: None,
-            gpu_face3d_edges: None,
+            gpu_face3d_edges: vec![],
             viewcube,
             cached_epoch: u64::MAX,
         }
@@ -613,7 +613,7 @@ impl Pipeline {
     pub fn upload_face3d(&mut self, device: &wgpu::Device, face3d_wires: &[WireModel]) {
         if face3d_wires.is_empty() {
             self.gpu_face3d_fill = None;
-            self.gpu_face3d_edges = None;
+            self.gpu_face3d_edges = vec![];
             return;
         }
         self.gpu_face3d_fill = Some(Face3DGpu::from_wires(device, face3d_wires));
@@ -813,36 +813,38 @@ impl Pipeline {
             }
         }
 
-        // ── Pass 5b: 3DFACE edges (batched) ──────────────────────────────
-        if let Some(ref edges) = self.gpu_face3d_edges {
-            if edges.vertex_count >= 6 {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("face3d_edges.render_pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: msaa,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
+        // ── Pass 5b: 3DFACE edges (batched, possibly multiple chunks) ────
+        if !self.gpu_face3d_edges.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("face3d_edges.render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: msaa,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
                     }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
-                pass.set_pipeline(&self.wire_pipeline);
-                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-                pass.set_vertex_buffer(0, edges.vertex_buffer.slice(..));
-                pass.draw(0..edges.vertex_count, 0..1);
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
+            pass.set_pipeline(&self.wire_pipeline);
+            pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            for edges in &self.gpu_face3d_edges {
+                if edges.vertex_count >= 6 {
+                    pass.set_vertex_buffer(0, edges.vertex_buffer.slice(..));
+                    pass.draw(0..edges.vertex_count, 0..1);
+                }
             }
         }
 

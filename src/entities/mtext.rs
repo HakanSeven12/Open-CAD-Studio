@@ -7,7 +7,7 @@ use crate::entities::text_support::{
     measure_mtext_chars, resolve_text_style, split_mtext_lines, strip_mtext_codes, word_wrap,
 };
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::cxf;
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::wire_model::SnapHint;
@@ -122,26 +122,22 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
     let vertical_text = matches!(t.drawing_direction, DrawingDirection::TopToBottom);
     let rot = t.rotation as f32;
     let (cos_r, sin_r) = (rot.cos(), rot.sin());
-    let insertion = Vec3::new(
-        t.insertion_point.x as f32,
-        t.insertion_point.y as f32,
-        t.insertion_point.z as f32,
-    );
-    let mut all_strokes = Vec::new();
+    let ins_x = t.insertion_point.x;
+    let ins_y = t.insertion_point.y;
+    let insertion = Vec3::new(ins_x as f32, ins_y as f32, t.insertion_point.z as f32);
+    let mut all_strokes: Vec<TextStroke> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let li = i as f32;
-        let (ox, oy) = if vertical_text {
+        // Compute line offset as f32 (small relative values), apply to f64 insertion point.
+        let (small_x, small_y) = if vertical_text {
             let col_offset = li * t.height as f32 * 1.2;
             (
-                t.insertion_point.x as f32 + col_offset * cos_r + v_offset * (-sin_r),
-                t.insertion_point.y as f32 + col_offset * sin_r + v_offset * cos_r,
+                col_offset * cos_r + v_offset * (-sin_r),
+                col_offset * sin_r + v_offset * cos_r,
             )
         } else {
             let line_y = -(li * line_h) + v_offset;
-            (
-                t.insertion_point.x as f32 + line_y * (-sin_r),
-                t.insertion_point.y as f32 + line_y * cos_r,
-            )
+            (line_y * (-sin_r), line_y * cos_r)
         };
         let line_w = if h_anchor > 0.0 {
             let scale = t.height as f32 / 9.0 * style_width_factor;
@@ -150,10 +146,12 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
             0.0
         };
         let h_shift = -line_w * h_anchor;
-        let origin_x = ox + h_shift * cos_r;
-        let origin_y = oy + h_shift * sin_r;
+        let origin: [f64; 2] = [
+            ins_x + (small_x + h_shift * cos_r) as f64,
+            ins_y + (small_y + h_shift * sin_r) as f64,
+        ];
         let strokes = cxf::tessellate_text_ex(
-            [origin_x, origin_y],
+            [0.0, 0.0],
             t.height as f32,
             rot,
             style_width_factor,
@@ -161,7 +159,7 @@ fn to_truck(t: &MText, document: &acadrust::CadDocument) -> TruckEntity {
             &font_name,
             line,
         );
-        all_strokes.extend(strokes);
+        all_strokes.push(TextStroke { strokes, origin });
     }
     TruckEntity {
         object: TruckObject::Text(all_strokes),

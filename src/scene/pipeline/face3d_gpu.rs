@@ -65,9 +65,10 @@ impl Face3DGpu {
             if wire.key_vertices.len() < 4 {
                 continue;
             }
-            let color = wire.color;
+            let [r, g, b, a] = wire.color;
+            let fill_color = [r * 0.45, g * 0.45, b * 0.45, a];
             let p = &wire.key_vertices;
-            let v = |i: usize| Face3DVertex { position: p[i], color };
+            let v = |i: usize| Face3DVertex { position: p[i], color: fill_color };
 
             // Triangle 1: p0, p1, p2
             vertices.push(v(0));

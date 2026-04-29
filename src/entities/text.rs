@@ -5,7 +5,7 @@ use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::text_support::{resolve_dxf_special_chars, resolve_text_style, text_local_bounds};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::cxf;
 use crate::scene::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::wire_model::SnapHint;
@@ -101,14 +101,17 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
     } else {
         (0.0, 0.0)
     };
-    let (cos_r, sin_r) = (rotation.cos(), rotation.sin());
-    let origin = [
-        anchor[0] - (anchor_local_x * cos_r - anchor_local_y * sin_r),
-        anchor[1] - (anchor_local_x * sin_r + anchor_local_y * cos_r),
+    let (cos_r, sin_r) = (rotation.cos() as f64, rotation.sin() as f64);
+    // Keep origin as f64 — large coordinates (UTM etc.) must not be cast to
+    // f32 here; world_offset subtraction happens later in tessellate.rs.
+    let anchor_f64 = [anchor[0] as f64, anchor[1] as f64];
+    let origin: [f64; 2] = [
+        anchor_f64[0] - (anchor_local_x as f64 * cos_r - anchor_local_y as f64 * sin_r),
+        anchor_f64[1] - (anchor_local_x as f64 * sin_r + anchor_local_y as f64 * cos_r),
     ];
-    // Pass raw value — tessellate_text_ex resolves %%x codes and emits decoration strokes.
-    let strokes_2d = cxf::tessellate_text_ex(
-        origin,
+    // Strokes are in glyph-local space (origin = [0,0]).
+    let strokes = cxf::tessellate_text_ex(
+        [0.0, 0.0],
         t.height as f32,
         rotation,
         width_factor,
@@ -117,7 +120,7 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         &t.value,
     );
     TruckEntity {
-        object: TruckObject::Text(strokes_2d),
+        object: TruckObject::Text(vec![TextStroke { strokes, origin }]),
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],

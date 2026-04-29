@@ -125,13 +125,13 @@ impl WireGpu {
         Self::build(device, wire, [r, g, b, a * alpha])
     }
 
-    /// Merge multiple WireModels into a single GPU buffer (1 draw call for all).
+    /// Merge multiple WireModels into GPU buffers chunked to fit the 256 MB GPU limit.
     /// Each wire keeps its own color and pattern — they're stored per-vertex.
-    /// Returns None if the combined vertex list is empty.
-    pub fn from_batch(device: &wgpu::Device, wires: &[WireModel]) -> Option<Self> {
+    /// Returns an empty Vec if the combined vertex list is empty.
+    pub fn from_batch(device: &wgpu::Device, wires: &[WireModel]) -> Vec<Self> {
         let total_segs: usize = wires.iter().map(|w| w.points.len().saturating_sub(1)).sum();
         if total_segs == 0 {
-            return None;
+            return vec![];
         }
         let mut vertices: Vec<WireVertex> = Vec::with_capacity(total_segs * 6);
 
@@ -186,19 +186,27 @@ impl WireGpu {
         }
 
         if vertices.is_empty() {
-            return None;
+            return vec![];
         }
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("wire.batch.vbuf"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        // GPU max buffer size is 256 MB; chunk to stay within the limit.
+        const MAX_VERTS: usize = 268_435_456 / std::mem::size_of::<WireVertex>();
 
-        Some(Self {
-            vertex_buffer,
-            vertex_count: vertices.len() as u32,
-        })
+        vertices
+            .chunks(MAX_VERTS)
+            .enumerate()
+            .map(|(i, chunk)| {
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("wire.batch.vbuf.{i}")),
+                    contents: bytemuck::cast_slice(chunk),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                Self {
+                    vertex_buffer,
+                    vertex_count: chunk.len() as u32,
+                }
+            })
+            .collect()
     }
 
     fn build(device: &wgpu::Device, wire: &WireModel, color: [f32; 4]) -> Self {

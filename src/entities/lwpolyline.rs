@@ -27,8 +27,8 @@ fn arc_midpoint(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> [f64; 2] {
     let py = dx / d;
     let sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
     let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-    let cx = mx - sign * px * (r - h);
-    let cy = my - sign * py * (r - h);
+    let cx = mx + sign * px * (r - h);
+    let cy = my + sign * py * (r - h);
     let a0 = (p0[1] - cy).atan2(p0[0] - cx);
     let a1 = (p1[1] - cy).atan2(p1[0] - cx);
     let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
@@ -112,8 +112,8 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             let py = dx / len;
             let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
             let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let cx = mx - sagitta_sign * px * (r - h);
-            let cy = my - sagitta_sign * py * (r - h);
+            let cx = mx + sagitta_sign * px * (r - h);
+            let cy = my + sagitta_sign * py * (r - h);
             let mid_a = {
                 let a0 = (p0.y - cy).atan2(p0.x - cx);
                 let a1 = (p1.y - cy).atan2(p1.x - cx);

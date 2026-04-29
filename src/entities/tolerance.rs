@@ -4,7 +4,7 @@ use glam::Vec3;
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable, TruckConvertible};
-use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
+use crate::scene::acad_to_truck::{TextStroke, TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 use crate::scene::{cxf, transform};
@@ -138,14 +138,13 @@ fn tessellate_tolerance(tol: &Tolerance) -> Vec<Vec<[f32; 2]>> {
     let total_w: f32 = col_widths.iter().sum();
     let total_h = cell_h * rows.len() as f32;
 
-    // ── Transform helpers (world 2-D, ignoring Z for Text path) ──────────
-    let ox = tol.insertion_point.x as f32;
-    let oy = tol.insertion_point.y as f32;
+    // ── Transform helpers (local space — translation applied in tessellate.rs) ──
     let angle = (tol.direction.y as f32).atan2(tol.direction.x as f32);
     let (sa, ca) = angle.sin_cos();
 
+    // Rotate only; origin is kept as f64 and applied later with full precision.
     let rot = |x: f32, y: f32| -> [f32; 2] {
-        [ox + x * ca - y * sa, oy + x * sa + y * ca]
+        [x * ca - y * sa, x * sa + y * ca]
     };
 
     let mut out: Vec<Vec<[f32; 2]>> = Vec::new();
@@ -228,12 +227,12 @@ impl TruckConvertible for Tolerance {
             self.insertion_point.z as f32,
         );
 
-        // Build the feature-control frame: box outline + cell text, all
-        // represented as 2-D CXF polylines (TruckObject::Text).
-        let polylines = tessellate_tolerance(self);
+        // Build the feature-control frame in local space; origin stored as f64.
+        let strokes = tessellate_tolerance(self);
+        let origin = [self.insertion_point.x, self.insertion_point.y];
 
         Some(TruckEntity {
-            object: TruckObject::Text(polylines),
+            object: TruckObject::Text(vec![TextStroke { strokes, origin }]),
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],

@@ -169,8 +169,8 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             let py = dx / len;
             let sagitta_sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
             let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-            let cx = mx - sagitta_sign * px * (r - h);
-            let cy = my - sagitta_sign * py * (r - h);
+            let cx = mx + sagitta_sign * px * (r - h);
+            let cy = my + sagitta_sign * py * (r - h);
             let mid_a = {
                 let a0 = (p0.y - cy).atan2(p0.x - cx);
                 let a1 = (p1.y - cy).atan2(p1.x - cx);

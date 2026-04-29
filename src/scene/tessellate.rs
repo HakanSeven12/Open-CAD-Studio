@@ -64,27 +64,29 @@ pub fn tessellate(
     if let Some(te) = convert(entity, document) {
         match te.object {
             // ── Text / MText: pre-tessellated glyph strokes ───────────────
-            TruckObject::Text(strokes_2d) => {
-                // Glyph strokes come from acad_to_truck in world-space f32.
-                // Subtract world_offset (f32 subtraction — acceptable precision
-                // for text rendering; the anchor was already cast to f32 there).
+            TruckObject::Text(stroke_groups) => {
+                // Each TextStroke keeps its strokes in glyph-local space and
+                // its world origin as f64.  Subtract world_offset in f64 before
+                // casting to f32 so large UTM coordinates don't crush precision.
                 let [ox, oy, oz] = world_offset;
                 let elev = entity_z(entity) - oz as f32;
 
-                // Pack all strokes into one flat point list, separated by
-                // NaN sentinels so wire_gpu.rs skips disconnected segments.
                 let mut points: Vec<[f32; 3]> = Vec::new();
-                for (i, stroke) in strokes_2d.iter().enumerate() {
-                    if stroke.len() < 2 {
-                        continue;
-                    }
-                    if i > 0 && !points.is_empty() {
-                        // NaN sentinel — wire_gpu skips any segment where
-                        // either endpoint contains NaN.
-                        points.push([f32::NAN, f32::NAN, f32::NAN]);
-                    }
-                    for &[x, y] in stroke {
-                        points.push([x - ox as f32, y - oy as f32, elev]);
+                let mut first = true;
+                for group in &stroke_groups {
+                    let lx = (group.origin[0] - ox) as f32;
+                    let ly = (group.origin[1] - oy) as f32;
+                    for stroke in &group.strokes {
+                        if stroke.len() < 2 {
+                            continue;
+                        }
+                        if !first && !points.is_empty() {
+                            points.push([f32::NAN, f32::NAN, f32::NAN]);
+                        }
+                        first = false;
+                        for &[x, y] in stroke {
+                            points.push([x + lx, y + ly, elev]);
+                        }
                     }
                 }
 
