@@ -196,13 +196,29 @@ impl Scene {
         }
     }
 
-    /// Returns true if this viewport ID identifies a user viewport (not the
-    /// sheet/overall viewport).  The standard sheet viewport has id=1; id=0
-    /// means "unset".  External DXF exporters sometimes use id=-1 for all
-    /// viewports, so any negative id is also treated as a user viewport.
-    pub fn is_user_viewport_id(id: i16) -> bool {
-        id != 0 && id != 1
+    /// Returns true if this viewport should display model-space content
+    /// (i.e. it is a user viewport, not the sheet/overall viewport).
+    ///
+    /// Rules:
+    /// - id=1  → always the sheet viewport → false
+    /// - id≥2  → always a user viewport    → true
+    /// - id=0 or id<0 (DWG reader omits the id; some DXF exporters write -1):
+    ///   use geometry: the sheet viewport is centred at the paper origin (0,0)
+    ///   with scale≈1.0 (view_height ≈ paper-space height).
+    pub fn is_content_viewport(vp: &acadrust::entities::Viewport) -> bool {
+        if vp.id == 1 { return false; }
+        if vp.id > 1  { return true;  }
+        // id=0 or id<0 — distinguish by geometry
+        let scale = if vp.view_height.abs() > 1e-9 {
+            vp.height / vp.view_height
+        } else {
+            1.0
+        };
+        let at_origin = vp.center.x.abs() < 0.5 && vp.center.y.abs() < 0.5;
+        let scale_one = (scale - 1.0).abs() < 0.02;
+        !(at_origin && scale_one)
     }
+
 
     /// Public accessor for the block-record handle of the current layout.
     /// Used by external callers (e.g. `commit_entity`) that need the handle
@@ -333,7 +349,7 @@ impl Scene {
         }
         self.document.entities().find_map(|e| {
             if let EntityType::Viewport(vp) = e {
-                if Self::is_user_viewport_id(vp.id) && vp.common.owner_handle == layout_block {
+                if Self::is_content_viewport(vp) && vp.common.owner_handle == layout_block {
                     let scale = if vp.custom_scale.abs() > 1e-9 {
                         vp.custom_scale
                     } else if vp.view_height.abs() > 1e-9 {
@@ -362,7 +378,7 @@ impl Scene {
             .entities()
             .filter_map(|e| {
                 if let EntityType::Viewport(vp) = e {
-                    if Self::is_user_viewport_id(vp.id) && vp.common.owner_handle == layout_block {
+                    if Self::is_content_viewport(vp) && vp.common.owner_handle == layout_block {
                         Some((vp.common.handle, vp.id, vp.frozen_layers.clone()))
                     } else {
                         None
@@ -398,7 +414,7 @@ impl Scene {
         }
         self.document.entities().filter(|e| {
             if let EntityType::Viewport(vp) = e {
-                Self::is_user_viewport_id(vp.id) && vp.common.owner_handle == layout_block
+                Self::is_content_viewport(vp) && vp.common.owner_handle == layout_block
             } else {
                 false
             }
@@ -802,7 +818,7 @@ impl Scene {
                 if let EntityType::Viewport(vp) = e { Some(vp) } else { None }
             })
             .filter(|vp| {
-                Self::is_user_viewport_id(vp.id)
+                Self::is_content_viewport(vp)
                     && vp.common.owner_handle == paper_block
                     && vp.status.is_on
                     && only_vp.map_or(true, |h| vp.common.handle == h)
@@ -1142,7 +1158,7 @@ impl Scene {
             .entities()
             .find_map(|e| {
                 let EntityType::Viewport(vp) = e else { return None; };
-                if !Self::is_user_viewport_id(vp.id) || vp.common.owner_handle != layout_block || !vp.status.is_on {
+                if !Self::is_content_viewport(vp) || vp.common.owner_handle != layout_block || !vp.status.is_on {
                     return None;
                 }
                 let hw = (vp.width / 2.0) as f32;
@@ -1163,7 +1179,7 @@ impl Scene {
         let layout_block = self.current_layout_block_handle();
         self.document.entities().find_map(|e| {
             let EntityType::Viewport(vp) = e else { return None; };
-            if Self::is_user_viewport_id(vp.id) && vp.common.owner_handle == layout_block && vp.status.is_on {
+            if Self::is_content_viewport(vp) && vp.common.owner_handle == layout_block && vp.status.is_on {
                 Some(vp.common.handle)
             } else {
                 None

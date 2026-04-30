@@ -1696,7 +1696,7 @@ impl H7CAD {
                                     if let Some(AcadEntityType::Viewport(vp)) =
                                         self.tabs[i].scene.document.get_entity(h)
                                     {
-                                        if Scene::is_user_viewport_id(vp.id) { Some(h) } else { None }
+                                        if Scene::is_content_viewport(vp) { Some(h) } else { None }
                                     } else {
                                         None
                                     }
