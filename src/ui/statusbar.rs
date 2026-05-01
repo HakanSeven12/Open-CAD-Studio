@@ -466,7 +466,7 @@ fn space_mode_btn(current_layout: &str, in_mspace: bool) -> Element<'static, Mes
     let (label, active, on_press) = if is_model_tab {
         ("MODEL", false, None::<Message>)
     } else if in_mspace {
-        ("MODEL", true, Some(Message::LayoutSwitch("Model".to_string())))
+        ("MODEL", true, Some(Message::ExitViewport))
     } else {
         ("PAPER", false, Some(Message::MspaceCommand))
     };
