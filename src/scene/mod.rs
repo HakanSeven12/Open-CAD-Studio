@@ -857,18 +857,22 @@ impl Scene {
             let view_up    = cam_frame.rotation * glam::Vec3::Y;
 
             // ── Scale & viewport parameters ───────────────────────────────
-            let scale = if vp.custom_scale.abs() > 1e-9 {
-                vp.custom_scale as f32
-            } else if vp.view_height.abs() > 1e-9 {
+            // view_height is always correct; custom_scale is unreliable in DWG files
+            // (acadrust DWG reader never populates it, so it stays at 1.0).
+            let scale = if vp.view_height.abs() > 1e-9 {
                 (vp.height / vp.view_height) as f32
+            } else if vp.custom_scale.abs() > 1e-9 {
+                vp.custom_scale as f32
             } else {
                 1.0
             };
 
+            // view_target is in raw model coords; wire points have world_offset
+            // subtracted, so bring target into the same wire-space.
             let target = glam::Vec3::new(
-                vp.view_target.x as f32,
-                vp.view_target.y as f32,
-                vp.view_target.z as f32,
+                (vp.view_target.x - self.world_offset[0]) as f32,
+                (vp.view_target.y - self.world_offset[1]) as f32,
+                (vp.view_target.z - self.world_offset[2]) as f32,
             );
             let pcx = vp.center.x as f32;
             let pcy = vp.center.y as f32;
@@ -904,8 +908,10 @@ impl Scene {
                         return [f32::NAN; 3];
                     }
                     let mp = glam::Vec3::new(mx, my, mz) - target;
-                    let u = mp.dot(view_right);
-                    let v = mp.dot(view_up);
+                    // view_center is the 2-D DCS offset of the display centre from
+                    // view_target; subtract it so model origin maps to viewport centre.
+                    let u = mp.dot(view_right) - vp.view_center.x as f32;
+                    let v = mp.dot(view_up)    - vp.view_center.y as f32;
                     if use_perspective {
                         let d_vd = mp.dot(cam_frame.rotation * glam::Vec3::Z);
                         let fwd = camera_dist - d_vd;
@@ -2526,11 +2532,21 @@ impl Scene {
         let pitch = vd.z.clamp(-0.999, 0.999).asin();
         let yaw = vd.x.atan2(vd.y);
 
-        let target = glam::Vec3::new(
-            vp.view_target.x as f32,
-            vp.view_target.y as f32,
-            vp.view_target.z as f32,
+        let rotation = camera::yaw_pitch_to_quat(yaw, pitch);
+        let view_right = rotation * glam::Vec3::X;
+        let view_up    = rotation * glam::Vec3::Y;
+
+        // view_target is in raw model/WCS coords; the GPU renderer works in
+        // wire-space (model - world_offset), so subtract world_offset here.
+        // view_center is a 2-D DCS offset of the display centre from view_target.
+        let base_target = glam::Vec3::new(
+            (vp.view_target.x - self.world_offset[0]) as f32,
+            (vp.view_target.y - self.world_offset[1]) as f32,
+            (vp.view_target.z - self.world_offset[2]) as f32,
         );
+        let target = base_target
+            + view_right * vp.view_center.x as f32
+            + view_up    * vp.view_center.y as f32;
 
         let fov_y = 45.0_f32.to_radians();
         let view_height = if vp.view_height.abs() > 1e-9 {
@@ -2543,7 +2559,7 @@ impl Scene {
 
         Some(camera::Camera {
             target,
-            rotation: camera::yaw_pitch_to_quat(yaw, pitch),
+            rotation,
             distance,
             fov_y,
             projection: camera::Projection::Orthographic,
