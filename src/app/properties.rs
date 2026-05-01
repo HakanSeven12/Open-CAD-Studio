@@ -295,6 +295,19 @@ impl H7CAD {
         );
         crate::scene::dispatch::apply_line_weight(&mut entity, self.ribbon.active_lineweight);
 
+        // Commands pick points in local space (camera coordinates with world_offset
+        // already subtracted). Re-add world_offset so the entity lands at the correct
+        // DXF coordinate. Skip for paper-space entities (they use sheet mm coords).
+        let is_paper = self.tabs[i].scene.current_layout != "Model";
+        if !is_paper {
+            let wo = self.tabs[i].scene.world_offset;
+            if wo[0] != 0.0 || wo[1] != 0.0 || wo[2] != 0.0 {
+                let delta = acadrust::types::Vector3::new(wo[0], wo[1], wo[2]);
+                let t = acadrust::types::Transform::from_translation(delta);
+                entity.apply_transform(&t);
+            }
+        }
+
         if matches!(&entity, acadrust::EntityType::Viewport(_))
             && self.tabs[i].scene.current_layout != "Model"
         {
