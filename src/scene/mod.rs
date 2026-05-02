@@ -208,15 +208,21 @@ impl Scene {
     pub fn is_content_viewport(vp: &acadrust::entities::Viewport) -> bool {
         if vp.id == 1 { return false; }
         if vp.id > 1  { return true;  }
-        // id=0 or id<0 — distinguish by geometry
+        // id ≤ 0: DWG files never write group-code 69 (viewport id), so all
+        // viewports arrive with id=0. Distinguish the sheet viewport by scale:
+        // the sheet ("overall") viewport has view_height ≈ vp.height → scale ≈ 1.
+        // True content viewports have deliberate drawing scales (1:50, 1:100 …)
+        // whose scale value is far from 1.0. The old check also required the
+        // center to be at the origin, but the sheet viewport center is the
+        // paper centre (e.g. 105, 148.5 for A4), so that condition failed for
+        // DWG files and incorrectly classified the sheet viewport as a content
+        // viewport — making it tessellated and enterable via double-click.
         let scale = if vp.view_height.abs() > 1e-9 {
             vp.height / vp.view_height
         } else {
             1.0
         };
-        let at_origin = vp.center.x.abs() < 0.5 && vp.center.y.abs() < 0.5;
-        let scale_one = (scale - 1.0).abs() < 0.02;
-        !(at_origin && scale_one)
+        (scale - 1.0).abs() >= 0.02
     }
 
 

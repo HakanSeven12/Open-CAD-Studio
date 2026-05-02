@@ -242,16 +242,6 @@ impl Camera {
         self.target += cam_up * delta_y * speed;
     }
 
-    /// Returns the world-space translation that `pan(delta_x, delta_y)` would
-    /// apply to the camera target — without actually moving the camera.
-    /// Used by MSPACE to pan the viewport's model-space view independently.
-    pub fn screen_delta_to_world(&self, delta_x: f32, delta_y: f32, _bounds: Rectangle) -> Vec3 {
-        let speed = self.distance * 0.001;
-        let cam_right = self.rotation * Vec3::X;
-        let cam_up = self.rotation * Vec3::Y;
-        -(cam_right * delta_x * speed) + (cam_up * delta_y * speed)
-    }
-
     pub fn fit_to_bounds(&mut self, min: Vec3, max: Vec3) {
         self.target = (min + max) * 0.5;
         let size = (max - min).length();
