@@ -14,11 +14,12 @@ use crate::scene::{cxf, transform};
 
 impl TruckConvertible for AttributeDefinition {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let snap_pt = Vec3::new(
-            self.insertion_point.x as f32,
-            self.insertion_point.y as f32,
-            self.insertion_point.z as f32,
+        let normal = (self.normal.x, self.normal.y, self.normal.z);
+        let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
+            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            normal,
         );
+        let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
         let resolved = resolve_text_style(&self.text_style, document);
         let display = if self.default_value.is_empty() {
             format!("[{}]", self.tag)
@@ -122,11 +123,12 @@ impl Transformable for AttributeDefinition {
 
 impl TruckConvertible for AttributeEntity {
     fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        let snap_pt = Vec3::new(
-            self.insertion_point.x as f32,
-            self.insertion_point.y as f32,
-            self.insertion_point.z as f32,
+        let normal = (self.normal.x, self.normal.y, self.normal.z);
+        let (wsx, wsy, wsz) = transform::ocs_point_to_wcs(
+            (self.insertion_point.x, self.insertion_point.y, self.insertion_point.z),
+            normal,
         );
+        let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
         let resolved = resolve_text_style(&self.text_style, document);
         let wf = (self.width_factor as f32).max(0.01);
         let origin = [self.insertion_point.x, self.insertion_point.y];

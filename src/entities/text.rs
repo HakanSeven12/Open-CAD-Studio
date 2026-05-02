@@ -47,11 +47,12 @@ fn sync_text_alignment_point(t: &mut Text) {
 }
 
 fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
-    let snap_pt = Vec3::new(
-        t.insertion_point.x as f32,
-        t.insertion_point.y as f32,
-        t.insertion_point.z as f32,
+    let normal = (t.normal.x, t.normal.y, t.normal.z);
+    let (wsx, wsy, wsz) = crate::scene::transform::ocs_point_to_wcs(
+        (t.insertion_point.x, t.insertion_point.y, t.insertion_point.z),
+        normal,
     );
+    let snap_pt = Vec3::new(wsx as f32, wsy as f32, wsz as f32);
     let resolved_style = resolve_text_style(&t.style, document);
     let font_name = resolved_style.font_name;
     let base_wf = (if t.width_factor > 0.0 { t.width_factor as f32 } else { 1.0 }
