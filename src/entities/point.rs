@@ -10,8 +10,13 @@ use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 
 fn to_truck(pt: &Point) -> TruckEntity {
-    let p = Point3::new(pt.location.x, pt.location.y, pt.location.z);
-    let snap = Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+    let normal = (pt.normal.x, pt.normal.y, pt.normal.z);
+    let (wx, wy, wz) = crate::scene::transform::ocs_point_to_wcs(
+        (pt.location.x, pt.location.y, pt.location.z),
+        normal,
+    );
+    let p = Point3::new(wx, wy, wz);
+    let snap = Vec3::new(wx as f32, wy as f32, wz as f32);
     TruckEntity {
         object: TruckObject::Point(builder::vertex(p)),
         snap_pts: vec![(snap, SnapHint::Node)],
