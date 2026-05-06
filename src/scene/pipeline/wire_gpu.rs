@@ -111,11 +111,16 @@ impl WireVertex {
 pub struct WireGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub vertex_count: u32,
+    /// Paper-space bbox [x0, y0, x1, y1] for GPU scissor clipping.
+    /// Set only for viewport-projected wires; None for regular wires.
+    pub vp_scissor: Option<[f32; 4]>,
 }
 
 impl WireGpu {
     pub fn new(device: &wgpu::Device, wire: &WireModel) -> Self {
-        Self::build(device, wire, wire.color)
+        let mut g = Self::build(device, wire, wire.color);
+        g.vp_scissor = wire.vp_scissor;
+        g
     }
 
     /// Creates a ghost copy with `alpha` applied on top of the wire's own alpha.
@@ -209,6 +214,7 @@ impl WireGpu {
                 Self {
                     vertex_buffer,
                     vertex_count: chunk.len() as u32,
+                    vp_scissor: None,
                 }
             })
             .collect()
@@ -310,6 +316,7 @@ impl WireGpu {
         Self {
             vertex_buffer,
             vertex_count: vertices.len() as u32,
+            vp_scissor: None,
         }
     }
 }

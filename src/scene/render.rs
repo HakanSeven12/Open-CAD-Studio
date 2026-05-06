@@ -131,6 +131,7 @@ impl shader::Primitive for Primitive {
             pipeline.upload_face3d(device, &self.face3d_wires[..]);
             pipeline.cached_epoch = self.geometry_epoch;
         }
+        pipeline.compute_wire_scissors(self.uniforms.view_proj, clip_size.width, clip_size.height);
         if self.show_viewcube {
             pipeline.viewcube.upload(
                 queue,

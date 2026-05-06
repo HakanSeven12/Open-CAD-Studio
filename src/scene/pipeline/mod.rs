@@ -52,6 +52,8 @@ pub struct Pipeline {
     /// Cached texture format (needed to recreate MSAA / depth textures on resize).
     surface_format: wgpu::TextureFormat,
     gpu_wires: Vec<WireGpu>,
+    /// Pixel scissor rects [x, y, w, h] for viewport-clipped wires. Recomputed each frame.
+    wire_pixel_scissors: Vec<Option<[u32; 4]>>,
     /// Ghost copies (25% alpha) of selected wires for the X-ray depth pass.
     gpu_selected_wires: Vec<WireGpu>,
     gpu_hatches: Vec<HatchGpu>,
@@ -584,6 +586,7 @@ impl Pipeline {
             blit_bind_group,
             surface_format: format,
             gpu_wires: vec![],
+            wire_pixel_scissors: vec![],
             gpu_selected_wires: vec![],
             gpu_hatches: vec![],
             gpu_wipeouts: vec![],
@@ -605,6 +608,30 @@ impl Pipeline {
             .filter(|w| w.selected)
             .map(|w| WireGpu::new(device, w))
             .collect();
+    }
+
+    /// Recompute pixel scissor rects for viewport-clipped wires from the current view_proj.
+    /// Called every frame from prepare() because scissor pixels shift with pan/zoom.
+    pub fn compute_wire_scissors(&mut self, view_proj: glam::Mat4, clip_w: u32, clip_h: u32) {
+        let w = clip_w as f32;
+        let h = clip_h as f32;
+        self.wire_pixel_scissors = self.gpu_wires.iter().map(|wire| {
+            let [x0, y0, x1, y1] = wire.vp_scissor?;
+            let corners = [
+                view_proj.project_point3(glam::Vec3::new(x0, y0, 0.0)),
+                view_proj.project_point3(glam::Vec3::new(x1, y0, 0.0)),
+                view_proj.project_point3(glam::Vec3::new(x0, y1, 0.0)),
+                view_proj.project_point3(glam::Vec3::new(x1, y1, 0.0)),
+            ];
+            let px: Vec<f32> = corners.iter().map(|c| (c.x + 1.0) * 0.5 * w).collect();
+            let py: Vec<f32> = corners.iter().map(|c| (1.0 - c.y) * 0.5 * h).collect();
+            let sx0 = px.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
+            let sy0 = py.iter().cloned().fold(f32::INFINITY, f32::min).max(0.0) as u32;
+            let sx1 = (px.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_w);
+            let sy1 = (py.iter().cloned().fold(f32::NEG_INFINITY, f32::max) as u32).min(clip_h);
+            if sx1 <= sx0 || sy1 <= sy0 { return None; }
+            Some([sx0, sy0, sx1 - sx0, sy1 - sy0])
+        }).collect();
     }
 
     /// Upload all 3DFACE entities as two batched GPU objects:
@@ -875,11 +902,27 @@ impl Pipeline {
             pass.set_viewport(0.0, 0.0, vp.width as f32, vp.height as f32, 0.0, 1.0);
             pass.set_pipeline(&self.wire_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-            for wire in &self.gpu_wires {
-                if wire.vertex_count >= 6 {
-                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                    pass.draw(0..wire.vertex_count, 0..1);
+            let mut scissor_active = false;
+            for (i, wire) in self.gpu_wires.iter().enumerate() {
+                if wire.vertex_count < 6 {
+                    continue;
                 }
+                match self.wire_pixel_scissors.get(i) {
+                    Some(Some([x, y, w, h])) => {
+                        pass.set_scissor_rect(*x, *y, *w, *h);
+                        scissor_active = true;
+                    }
+                    _ if scissor_active => {
+                        pass.set_scissor_rect(0, 0, vp.width, vp.height);
+                        scissor_active = false;
+                    }
+                    _ => {}
+                }
+                pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
+                pass.draw(0..wire.vertex_count, 0..1);
+            }
+            if scissor_active {
+                pass.set_scissor_rect(0, 0, vp.width, vp.height);
             }
         }
 

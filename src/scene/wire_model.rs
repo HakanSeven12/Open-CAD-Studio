@@ -63,6 +63,9 @@ pub struct WireModel {
     /// When false the linetype pattern restarts at each NaN-separated segment
     /// (DXF PLINEGEN=0).  When true the pattern runs continuously (PLINEGEN=1).
     pub plinegen: bool,
+    /// Paper-space bounding box [x0, y0, x1, y1] for GPU scissor clipping.
+    /// Set only for viewport-projected wires in paper-space layouts.
+    pub vp_scissor: Option<[f32; 4]>,
 }
 
 impl WireModel {
@@ -89,6 +92,7 @@ impl WireModel {
             key_vertices: vec![],
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         }
     }
 
@@ -189,6 +193,7 @@ impl Default for WireModel {
             key_vertices: Vec::new(),
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         }
     }
 }

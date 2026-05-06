@@ -77,6 +77,7 @@ impl CadCommand for AreaCommand {
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         })
     }
 }

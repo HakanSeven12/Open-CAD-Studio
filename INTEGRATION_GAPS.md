@@ -55,7 +55,7 @@ Legend: ✅ Done · ⚠️ Partial · ❌ Not done
 
 | Status | Entity | What works | What's missing |
 |---|---|---|---|
-| ⚠️ | **Viewport** (paper space) | Frame (active=gold, inactive=cyan), CPU projection + Cohen-Sutherland clipping, perspective, layer freeze per-viewport, MSPACE switching, pan/zoom/orbit | GPU scissor rect for pixel-level boundary clipping; stencil masking for overlapping viewports |
+| ✅ | **Viewport** (paper space) | Frame (active=gold, inactive=cyan), CPU projection + Cohen-Sutherland clipping, perspective, layer freeze per-viewport, MSPACE switching, pan/zoom/orbit, GPU scissor rect per viewport wire | Stencil masking for overlapping viewports (rare edge case) |
 
 ---
 
@@ -207,13 +207,9 @@ These are fixed in our post-load `fix_dxf_dimension_rotations()` in `src/io/mod.
 
 | Status | Count |
 |---|---|
-| ✅ Done | 50 |
-| ⚠️ Partial | 1 |
+| ✅ Done | 51 |
+| ⚠️ Partial | 0 |
 | ❌ Not done | 0 |
 | **Total** | **51** |
 
-### Remaining gaps by priority
-
-**Medium:** Viewport GPU scissor rect (pixel-level boundary clipping for overlapping viewports)
-
-No remaining low-priority gaps.
+All gaps resolved.

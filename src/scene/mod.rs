@@ -976,6 +976,7 @@ impl Scene {
                 out.points = clipped;
                 out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
                 out.line_weight_px = wire.line_weight_px;
+                out.vp_scissor = Some([vp_x0, vp_y0, vp_x1, vp_y1]);
                 projected.push(out);
             }
 
@@ -3212,6 +3213,7 @@ fn tessellate_entity(
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         });
         return wires;
     }

@@ -105,6 +105,7 @@ pub fn tessellate(
             key_vertices: te.key_vertices,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
                 };
             }
 
@@ -134,6 +135,7 @@ pub fn tessellate(
                             key_vertices: te.key_vertices,
                             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
                         };
                     }
                     _ => {}
@@ -161,6 +163,7 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
                     };
                 }
             }
@@ -186,6 +189,7 @@ pub fn tessellate(
                         key_vertices,
                         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
                     };
                 }
             }
@@ -217,6 +221,7 @@ pub fn tessellate(
                     key_vertices,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
+            vp_scissor: None,
                 };
             }
 
@@ -243,6 +248,7 @@ pub fn tessellate(
                     aci: 0,
                     key_vertices,
                     plinegen: false,
+            vp_scissor: None,
                     aabb: WireModel::UNBOUNDED_AABB,
                 };
             }
@@ -274,6 +280,7 @@ pub fn tessellate(
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
     }
 }
 
@@ -330,6 +337,7 @@ pub fn tessellate_dimension(
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
     }];
 
     if let Some(text) = dimension_text_entity(dim) {
@@ -379,6 +387,7 @@ fn tessellate_leader(
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         }];
     }
 
@@ -448,6 +457,7 @@ fn tessellate_leader(
         key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
     }]
 }
 
@@ -558,6 +568,7 @@ fn tessellate_multileader(
             key_vertices: key_verts,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
     }];
 
     // Render text content as MText wire

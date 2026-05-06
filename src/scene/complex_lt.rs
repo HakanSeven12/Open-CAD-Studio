@@ -203,6 +203,7 @@ pub fn apply_along(
             key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
+            vp_scissor: None,
         })
         .collect()
 }
