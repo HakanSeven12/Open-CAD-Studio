@@ -52,16 +52,17 @@ pub struct Face3DGpu {
 }
 
 impl Face3DGpu {
-    /// Build a batched GPU buffer from Face3D wire models.
+    /// Build a batched GPU buffer from Face3D wire models and mesh fill_tris.
     ///
-    /// Each WireModel's `key_vertices` holds the 4 corners in local space
-    /// (world_offset already applied by tessellate.rs).  Two triangles are
-    /// emitted per face: (p0,p1,p2) and (p0,p2,p3).
-    pub fn from_wires(device: &wgpu::Device, wires: &[WireModel]) -> Self {
-        let mut vertices: Vec<Face3DVertex> = Vec::with_capacity(wires.len() * 6);
+    /// - `face3d_wires`: Face3D entities — `key_vertices` holds 4 quad corners;
+    ///   emits 2 triangles per face.
+    /// - `all_wires`: all entity wires — `fill_tris` holds pre-triangulated
+    ///   fill data for PolyfaceMesh / PolygonMesh.
+    pub fn from_wires(device: &wgpu::Device, face3d_wires: &[WireModel], all_wires: &[WireModel]) -> Self {
+        let mut vertices: Vec<Face3DVertex> = Vec::with_capacity(face3d_wires.len() * 6);
 
-        for wire in wires {
-            // key_vertices has exactly 4 entries for Face3D (p0..p3).
+        // Face3D quads (4 key_vertices → 2 triangles).
+        for wire in face3d_wires {
             if wire.key_vertices.len() < 4 {
                 continue;
             }
@@ -69,15 +70,24 @@ impl Face3DGpu {
             let fill_color = [r * 0.45, g * 0.45, b * 0.45, a];
             let p = &wire.key_vertices;
             let v = |i: usize| Face3DVertex { position: p[i], color: fill_color };
-
-            // Triangle 1: p0, p1, p2
             vertices.push(v(0));
             vertices.push(v(1));
             vertices.push(v(2));
-            // Triangle 2: p0, p2, p3
             vertices.push(v(0));
             vertices.push(v(2));
             vertices.push(v(3));
+        }
+
+        // PolyfaceMesh / PolygonMesh pre-triangulated fills.
+        for wire in all_wires {
+            if wire.fill_tris.is_empty() {
+                continue;
+            }
+            let [r, g, b, a] = wire.color;
+            let fill_color = [r * 0.45, g * 0.45, b * 0.45, a];
+            for &position in &wire.fill_tris {
+                vertices.push(Face3DVertex { position, color: fill_color });
+            }
         }
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

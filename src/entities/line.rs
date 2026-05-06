@@ -50,6 +50,7 @@ fn to_truck(line: &Line) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![tangent],
             key_vertices: kv,
+            fill_tris: vec![],
         };
     }
 
@@ -61,6 +62,7 @@ fn to_truck(line: &Line) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![tangent],
         key_vertices: kv,
+        fill_tris: vec![],
     }
 }
 

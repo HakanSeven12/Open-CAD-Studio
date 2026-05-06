@@ -147,6 +147,7 @@ pub fn tessellate(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                 };
             }
 
@@ -177,6 +178,7 @@ pub fn tessellate(
                             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                         };
                     }
                     _ => {}
@@ -205,6 +207,7 @@ pub fn tessellate(
                         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                     };
                 }
             }
@@ -231,6 +234,7 @@ pub fn tessellate(
                         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                     };
                 }
             }
@@ -248,6 +252,9 @@ pub fn tessellate(
                 let key_vertices: Vec<[f32; 3]> = te.key_vertices.into_iter()
                     .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
                     .collect();
+                let fill_tris: Vec<[f32; 3]> = te.fill_tris.into_iter()
+                    .map(|[x, y, z]| [x - ox as f32, y - oy as f32, z - oz as f32])
+                    .collect();
                 return WireModel {
                     name,
                     points: local_pts,
@@ -262,7 +269,8 @@ pub fn tessellate(
                     key_vertices,
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-            vp_scissor: None,
+                    vp_scissor: None,
+                    fill_tris,
                 };
             }
 
@@ -291,6 +299,7 @@ pub fn tessellate(
                     plinegen: false,
             vp_scissor: None,
                     aabb: WireModel::UNBOUNDED_AABB,
+                    fill_tris: vec![],
                 };
             }
 
@@ -339,6 +348,7 @@ pub fn tessellate(
         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
     }
 }
 
@@ -397,6 +407,7 @@ pub fn tessellate_dimension(
         aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
     }];
 
     if let Some(text) = dimension_text_entity(dim) {
@@ -454,6 +465,7 @@ fn tessellate_leader_single(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         };
     }
 
@@ -508,6 +520,7 @@ fn tessellate_leader_single(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }
 }
 
@@ -637,6 +650,7 @@ fn tessellate_multileader_single(
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
         vp_scissor: None,
+        fill_tris: vec![],
     }
 }
 

@@ -103,5 +103,6 @@ fn preview_line(a: Vec3, b: Vec3) -> WireModel {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
     }
 }

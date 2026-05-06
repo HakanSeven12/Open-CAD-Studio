@@ -137,6 +137,7 @@ impl TruckConvertible for Table {
             snap_pts: vec![(origin, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         })
     }
 }

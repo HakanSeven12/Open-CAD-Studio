@@ -104,6 +104,7 @@ impl CadCommand for AlignedDimensionCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 }
@@ -140,5 +141,6 @@ fn preview_aligned(p1: Vec3, p2: Vec3, dim_pt: Vec3) -> WireModel {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
     }
 }

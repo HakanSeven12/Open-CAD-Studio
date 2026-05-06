@@ -121,6 +121,7 @@ impl CadCommand for WipeoutCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                 })
             }
             WipeoutMode::Polygonal => {
@@ -144,6 +145,7 @@ impl CadCommand for WipeoutCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                 })
             }
         }

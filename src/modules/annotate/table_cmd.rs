@@ -147,6 +147,7 @@ impl CadCommand for TableCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
             })
         } else {
             None

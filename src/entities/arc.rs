@@ -87,6 +87,7 @@ fn to_truck(arc: &Arc) -> TruckEntity {
             snap_pts: vec![(cv, SnapHint::Center)],
             tangent_geoms: vec![tangent],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -101,6 +102,7 @@ fn to_truck(arc: &Arc) -> TruckEntity {
         snap_pts: vec![(cv, SnapHint::Center)],
         tangent_geoms: vec![tangent],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

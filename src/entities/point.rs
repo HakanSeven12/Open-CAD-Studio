@@ -22,6 +22,7 @@ fn to_truck(pt: &Point) -> TruckEntity {
         snap_pts: vec![(snap, SnapHint::Node)],
         tangent_geoms: vec![],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

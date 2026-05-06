@@ -22,6 +22,7 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -42,6 +43,7 @@ fn to_truck(ole: &Ole2Frame) -> TruckEntity {
         snap_pts: vec![(center, SnapHint::Center)],
         tangent_geoms: vec![],
         key_vertices: vec![[x0, y0, z], [x1, y1, z]],
+        fill_tris: vec![],
     }
 }
 

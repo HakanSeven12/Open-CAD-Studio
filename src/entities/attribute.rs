@@ -42,6 +42,7 @@ impl TruckConvertible for AttributeDefinition {
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         })
     }
 }
@@ -146,6 +147,7 @@ impl TruckConvertible for AttributeEntity {
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         })
     }
 }

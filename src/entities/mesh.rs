@@ -64,6 +64,7 @@ impl TruckConvertible for Face3D {
             ],
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
+            fill_tris: vec![],
         })
     }
 }
@@ -182,9 +183,9 @@ impl TruckConvertible for PolygonMesh {
         };
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut fill_tris: Vec<[f32; 3]> = Vec::new();
 
         // Rows (M direction).
-        let m_end = if closed_m { m } else { m - 1 };
         for i in 0..m {
             pts.push([f32::NAN; 3]);
             for j in 0..n {
@@ -196,7 +197,6 @@ impl TruckConvertible for PolygonMesh {
         }
 
         // Columns (N direction).
-        let n_end = if closed_n { n } else { n - 1 };
         for j in 0..n {
             pts.push([f32::NAN; 3]);
             for i in 0..m {
@@ -206,13 +206,26 @@ impl TruckConvertible for PolygonMesh {
                 pts.push(pt(0, j));
             }
         }
-        let _ = (m_end, n_end); // suppress warnings
+
+        // Fill: triangulate each grid quad (two triangles per cell).
+        let mi = if closed_m { m } else { m - 1 };
+        let ni = if closed_n { n } else { n - 1 };
+        for i in 0..mi {
+            for j in 0..ni {
+                let p00 = pt(i, j);
+                let p10 = pt((i + 1) % m, j);
+                let p01 = pt(i, (j + 1) % n);
+                let p11 = pt((i + 1) % m, (j + 1) % n);
+                fill_tris.extend_from_slice(&[p00, p10, p11, p00, p11, p01]);
+            }
+        }
 
         Some(TruckEntity {
             object: TruckObject::Lines(pts),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris,
         })
     }
 }
@@ -294,6 +307,7 @@ impl TruckConvertible for PolyfaceMesh {
         };
 
         let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut fill_tris: Vec<[f32; 3]> = Vec::new();
 
         for face in &self.faces {
             // Indices: 0 means unused. Negative = invisible edge (still render for wireframe).
@@ -313,6 +327,15 @@ impl TruckConvertible for PolyfaceMesh {
             }
             // Close the face polygon.
             pts.push(verts[0]);
+
+            // Fan-triangulate the face for solid fill.
+            if verts.len() >= 3 {
+                for i in 1..(verts.len() - 1) {
+                    fill_tris.push(verts[0]);
+                    fill_tris.push(verts[i]);
+                    fill_tris.push(verts[i + 1]);
+                }
+            }
         }
 
         Some(TruckEntity {
@@ -320,6 +343,7 @@ impl TruckConvertible for PolyfaceMesh {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris,
         })
     }
 }

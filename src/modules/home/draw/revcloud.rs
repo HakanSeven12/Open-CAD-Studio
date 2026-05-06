@@ -85,6 +85,7 @@ impl CadCommand for RevCloudCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 }

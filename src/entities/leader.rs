@@ -64,6 +64,7 @@ fn to_truck(leader: &Leader) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 

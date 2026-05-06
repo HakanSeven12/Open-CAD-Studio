@@ -47,6 +47,7 @@ impl TruckConvertible for Solid {
             snap_pts: snap,
             tangent_geoms: vec![],
             key_vertices: vec![p0, p1, p2, p3],
+            fill_tris: vec![],
         })
     }
 }

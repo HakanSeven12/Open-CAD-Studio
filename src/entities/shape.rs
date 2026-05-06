@@ -47,6 +47,7 @@ impl TruckConvertible for Shape {
             snap_pts: vec![(snap_pt, SnapHint::Insertion)],
             tangent_geoms: vec![],
             key_vertices: vec![[ox, oy, oz]],
+            fill_tris: vec![],
         })
     }
 }

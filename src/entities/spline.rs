@@ -19,6 +19,7 @@ fn to_truck(spl: &Spline) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -92,6 +93,7 @@ fn to_truck(spl: &Spline) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices,
+        fill_tris: vec![],
     }
 }
 

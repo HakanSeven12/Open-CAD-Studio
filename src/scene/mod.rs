@@ -3505,6 +3505,7 @@ fn tessellate_entity(
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         });
         return wires;
     }

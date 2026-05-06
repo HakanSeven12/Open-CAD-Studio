@@ -56,6 +56,7 @@ impl TruckConvertible for Underlay {
                 snap_pts: vec![(Vec3::from(origin), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: key,
+                fill_tris: vec![],
             })
         } else {
             // No clip boundary: draw a cross at insertion point.
@@ -65,6 +66,7 @@ impl TruckConvertible for Underlay {
                 snap_pts: vec![(Vec3::from(origin), SnapHint::Node)],
                 tangent_geoms: vec![],
                 key_vertices: vec![origin],
+                fill_tris: vec![],
             })
         }
     }

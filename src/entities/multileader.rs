@@ -156,6 +156,7 @@ fn to_truck(ml: &MultiLeader, document: &acadrust::CadDocument) -> Option<TruckE
         snap_pts,
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     })
 }
 

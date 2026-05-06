@@ -34,6 +34,7 @@ impl TruckConvertible for Ray {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![start],
+            fill_tris: vec![],
         })
     }
 }
@@ -165,6 +166,7 @@ impl TruckConvertible for XLine {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![[bp.x as f32, bp.y as f32, bp.z as f32]],
+            fill_tris: vec![],
         })
     }
 }

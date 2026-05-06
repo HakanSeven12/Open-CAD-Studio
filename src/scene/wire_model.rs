@@ -66,6 +66,9 @@ pub struct WireModel {
     /// Paper-space bounding box [x0, y0, x1, y1] for GPU scissor clipping.
     /// Set only for viewport-projected wires in paper-space layouts.
     pub vp_scissor: Option<[f32; 4]>,
+    /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
+    /// Non-empty only for PolyfaceMesh / PolygonMesh entities.
+    pub fill_tris: Vec<[f32; 3]>,
 }
 
 impl WireModel {
@@ -93,6 +96,7 @@ impl WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         }
     }
 
@@ -194,6 +198,7 @@ impl Default for WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: Vec::new(),
         }
     }
 }

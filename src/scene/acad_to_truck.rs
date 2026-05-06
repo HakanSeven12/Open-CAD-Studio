@@ -33,6 +33,9 @@ pub struct TruckEntity {
     pub snap_pts: Vec<(Vec3, SnapHint)>,
     pub tangent_geoms: Vec<TangentGeom>,
     pub key_vertices: Vec<[f32; 3]>,
+    /// Pre-triangulated fill geometry: flat list of [f32;3] vertices, 3 per triangle.
+    /// Non-empty for mesh-like entities (PolyfaceMesh, PolygonMesh) that need solid fill.
+    pub fill_tris: Vec<[f32; 3]>,
 }
 
 pub fn convert(entity: &EntityType, document: &CadDocument) -> Option<TruckEntity> {

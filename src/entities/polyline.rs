@@ -31,6 +31,7 @@ fn tessellate_polyline(pl: &Polyline) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 
@@ -127,6 +128,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -204,7 +206,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
                 if i + 1 < kv.len() { pts.push([f32::NAN; 3]); }
             }
         }
-        return TruckEntity { object: TruckObject::Lines(pts), snap_pts: vec![], tangent_geoms: tgs, key_vertices: kv };
+        return TruckEntity { object: TruckObject::Lines(pts), snap_pts: vec![], tangent_geoms: tgs, key_vertices: kv, fill_tris: vec![] };
     }
 
     for i in 0..seg_count {
@@ -271,6 +273,7 @@ fn tessellate_polyline2d(pl: &Polyline2D) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 
@@ -397,6 +400,7 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: vec![],
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 

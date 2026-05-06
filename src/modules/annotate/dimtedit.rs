@@ -104,6 +104,7 @@ impl CadCommand for DimTeditCommand {
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
         })
     }
 

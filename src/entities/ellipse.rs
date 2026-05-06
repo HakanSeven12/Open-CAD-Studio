@@ -102,6 +102,7 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
             snap_pts,
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         }
     } else {
         let n = 32usize;
@@ -133,6 +134,7 @@ fn to_truck(ell: &Ellipse) -> TruckEntity {
             snap_pts: vec![(center_v3, SnapHint::Center)],
             tangent_geoms: vec![],
             key_vertices,
+            fill_tris: vec![],
         }
     }
 }

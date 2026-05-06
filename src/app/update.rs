@@ -1376,6 +1376,7 @@ impl H7CAD {
                                     aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                                     plinegen: true,
             vp_scissor: None,
+            fill_tris: vec![],
                                 };
                                 previews.push(guide);
                             }

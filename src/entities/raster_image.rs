@@ -129,6 +129,7 @@ impl TruckConvertible for RasterImage {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),
+            fill_tris: vec![],
         })
     }
 }
@@ -289,6 +290,7 @@ impl TruckConvertible for Wipeout {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: corners.to_vec(),
+            fill_tris: vec![],
         })
     }
 }

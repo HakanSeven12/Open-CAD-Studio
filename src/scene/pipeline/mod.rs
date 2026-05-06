@@ -637,13 +637,15 @@ impl Pipeline {
     /// Upload all 3DFACE entities as two batched GPU objects:
     /// - `gpu_face3d_fill`: filled triangles (1 buffer, 1 draw call)
     /// - `gpu_face3d_edges`: merged edge wires (1 buffer, 1 draw call)
-    pub fn upload_face3d(&mut self, device: &wgpu::Device, face3d_wires: &[WireModel]) {
-        if face3d_wires.is_empty() {
+    pub fn upload_face3d(&mut self, device: &wgpu::Device, face3d_wires: &[WireModel], all_wires: &[WireModel]) {
+        let has_fills = !face3d_wires.is_empty()
+            || all_wires.iter().any(|w| !w.fill_tris.is_empty());
+        if !has_fills {
             self.gpu_face3d_fill = None;
             self.gpu_face3d_edges = vec![];
             return;
         }
-        self.gpu_face3d_fill = Some(Face3DGpu::from_wires(device, face3d_wires));
+        self.gpu_face3d_fill = Some(Face3DGpu::from_wires(device, face3d_wires, all_wires));
         self.gpu_face3d_edges = WireGpu::from_batch(device, face3d_wires);
     }
 

@@ -91,6 +91,7 @@ fn to_truck(circle: &Circle) -> TruckEntity {
             snap_pts,
             tangent_geoms: vec![tangent],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -104,6 +105,7 @@ fn to_truck(circle: &Circle) -> TruckEntity {
         snap_pts,
         tangent_geoms: vec![tangent],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 

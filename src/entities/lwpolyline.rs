@@ -106,7 +106,7 @@ fn thick_segments(
             pts.push(off(last));
         }
     }
-    TruckEntity { object: TruckObject::Lines(pts), snap_pts: vec![], tangent_geoms: tangents, key_vertices: key_verts }
+    TruckEntity { object: TruckObject::Lines(pts), snap_pts: vec![], tangent_geoms: tangents, key_vertices: key_verts, fill_tris: vec![] }
 }
 
 fn to_truck(pline: &LwPolyline) -> TruckEntity {
@@ -117,6 +117,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
+            fill_tris: vec![],
         };
     }
 
@@ -237,6 +238,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
             snap_pts: vec![],
             tangent_geoms: tgs,
             key_vertices: kv,
+            fill_tris: vec![],
         };
     }
 
@@ -305,6 +307,7 @@ fn to_truck(pline: &LwPolyline) -> TruckEntity {
         snap_pts: vec![],
         tangent_geoms: tangents,
         key_vertices: key_verts,
+        fill_tris: vec![],
     }
 }
 

@@ -125,6 +125,7 @@ fn to_truck(t: &Text, document: &acadrust::CadDocument) -> TruckEntity {
         snap_pts: vec![(snap_pt, SnapHint::Insertion)],
         tangent_geoms: vec![],
         key_vertices: vec![],
+        fill_tris: vec![],
     }
 }
 
