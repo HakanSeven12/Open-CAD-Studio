@@ -61,9 +61,11 @@ pub async fn open_path_with_phase(
     let phase2 = phase.clone();
     let (doc, caches) = std::thread::spawn(move || -> Result<_, String> {
         phase2.store(PHASE_PARSING, Ordering::Relaxed);
-        let doc = load_file(&path2)?;
+        let mut doc = load_file(&path2)?;
+        let dropped = purge_corrupt_entities(&mut doc);
         phase2.store(PHASE_CACHING, Ordering::Relaxed);
-        let caches = crate::scene::build_derived_caches(&doc);
+        let mut caches = crate::scene::build_derived_caches(&doc);
+        caches.corrupt_dropped = dropped;
         phase2.store(PHASE_FINALIZING, Ordering::Relaxed);
         Ok((doc, caches))
     })
@@ -221,6 +223,87 @@ pub fn save(doc: &CadDocument, path: &Path) -> Result<(), String> {
 }
 
 // ── Post-load fixups ──────────────────────────────────────────────────────
+
+// ── Corrupt-entity guard ──────────────────────────────────────────────────
+//
+// acadrust's DWG parser occasionally desynchronises on certain files and
+// produces entities with garbage fields: non-unit normals (components in
+// 1e200+), nonsensical vertex counts (e.g. 100000), or infinite/NaN
+// coordinates.  Tessellating such entities triggers huge allocations and
+// numerical blow-ups in the wire pipeline.
+//
+// `purge_corrupt_entities` scans the document and removes any entity that
+// fails a cheap sanity check, returning the number dropped so the caller can
+// surface it to the UI / log.
+
+fn finite_unit_normal(n: &acadrust::types::Vector3) -> bool {
+    let (x, y, z) = (n.x, n.y, n.z);
+    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+        return false;
+    }
+    let mag2 = x * x + y * y + z * z;
+    // Accept anything within ~10% of unit length. Real files sometimes
+    // store slightly denormalised normals from rounding.
+    (mag2 - 1.0).abs() < 0.21
+}
+
+fn finite_coord(v: f64) -> bool {
+    v.is_finite() && v.abs() < 1.0e12
+}
+
+fn finite_vec3(v: &acadrust::types::Vector3) -> bool {
+    finite_coord(v.x) && finite_coord(v.y) && finite_coord(v.z)
+}
+
+/// Returns true if the entity looks like parser garbage and should be dropped.
+fn is_entity_corrupt(e: &EntityType) -> bool {
+    use acadrust::entities::EntityType as E;
+    const MAX_VERTS: usize = 100_000;
+    match e {
+        E::LwPolyline(p) => {
+            !finite_unit_normal(&p.normal)
+                || p.vertices.len() > MAX_VERTS
+                || !finite_coord(p.elevation)
+                || p.elevation.abs() > 1.0e10
+        }
+        E::Polyline2D(p) => {
+            !finite_unit_normal(&p.normal)
+                || p.vertices.len() > MAX_VERTS
+                || !finite_coord(p.elevation)
+                || p.elevation.abs() > 1.0e10
+        }
+        E::Polyline3D(p) => {
+            p.vertices.len() > MAX_VERTS
+                || p.vertices.iter().any(|v| !finite_vec3(&v.position))
+        }
+        E::Polyline(p) => {
+            p.vertices.len() > MAX_VERTS
+                || p.vertices.iter().any(|v| !finite_vec3(&v.location))
+        }
+        E::Line(l) => !finite_vec3(&l.start) || !finite_vec3(&l.end),
+        E::Circle(c) => !finite_vec3(&c.center) || !finite_coord(c.radius),
+        E::Arc(a) => {
+            !finite_vec3(&a.center)
+                || !finite_coord(a.radius)
+                || !a.start_angle.is_finite()
+                || !a.end_angle.is_finite()
+        }
+        _ => false,
+    }
+}
+
+pub fn purge_corrupt_entities(doc: &mut CadDocument) -> usize {
+    let bad: Vec<acadrust::Handle> = doc
+        .entities()
+        .filter(|e| is_entity_corrupt(e))
+        .map(|e| e.common().handle)
+        .collect();
+    let n = bad.len();
+    for h in bad {
+        doc.remove_entity(h);
+    }
+    n
+}
 
 /// acadrust's ViewportStatusFlags::from_bits() maps bit 0 → is_on and bit 15 → locked,
 /// but the real DXF/DWG spec uses bit 15 (0x8000) → viewport on and bit 14 (0x4000) → locked.

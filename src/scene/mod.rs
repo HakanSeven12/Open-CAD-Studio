@@ -69,6 +69,10 @@ pub struct DerivedCaches {
     pub hatches: HashMap<Handle, HatchModel>,
     pub images: HashMap<Handle, ImageModel>,
     pub meshes: HashMap<Handle, MeshModel>,
+    /// Number of entities removed by the corrupt-entity guard during load.
+    /// Reported back to the UI so the user knows when a file had parser-junk
+    /// entities silently dropped.
+    pub corrupt_dropped: usize,
 }
 
 /// Build hatch / image / mesh caches from a document without needing `&mut Scene`.
@@ -191,6 +195,7 @@ pub fn build_derived_caches(doc: &CadDocument) -> DerivedCaches {
         hatches,
         images,
         meshes,
+        corrupt_dropped: 0,
     }
 }
 

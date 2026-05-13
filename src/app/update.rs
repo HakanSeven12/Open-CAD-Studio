@@ -97,6 +97,12 @@ impl H7CAD {
                 let entity_count = doc.entities().count();
                 self.command_line
                     .push_output(&format!("Opened \"{name}\" — {entity_count} entities"));
+                if caches.corrupt_dropped > 0 {
+                    self.command_line.push_error(&format!(
+                        "Warning: {} corrupt entities dropped (parser junk — bad normals / counts)",
+                        caches.corrupt_dropped
+                    ));
+                }
                 self.app_menu.push_recent(path.clone());
 
                 let current_is_empty = {
