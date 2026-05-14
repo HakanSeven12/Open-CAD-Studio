@@ -26,9 +26,11 @@ use crate::scene::wire_model::{SnapHint, TangentGeom, WireModel};
 
 const MAX_NESTING_DEPTH: usize = 32;
 /// Skip wires whose world-AABB projects to fewer than this many pixels in
-/// the active view. Picks up sub-pixel detail at extreme zoom-out so the
-/// tessellator doesn't waste time on geometry the user can't see anyway.
-const MIN_PIXEL_SIZE: f32 = 0.5;
+/// the active view. Picks up tiny detail at zoom-out so the tessellator
+/// doesn't waste time on geometry that contributes a few sub-pixel marks
+/// to the final image. 2 px is the AutoCAD-default "small element" floor
+/// — visibly the same image, dramatically fewer wires.
+const MIN_PIXEL_SIZE: f32 = 2.0;
 
 #[derive(Clone, Debug)]
 pub struct LocalWire {
@@ -51,6 +53,11 @@ pub struct LocalWire {
     /// expand-time: transform corners by the Insert transform → world AABB
     /// → test against the camera's world-space view rect.
     pub aabb_local: [f32; 4],
+    /// For Text / MText subs: the entity's anno-scaled glyph height in
+    /// local units. Lets `emit_wire` apply the same LOD ladder used for
+    /// top-level text (cull / greek / full) to text that's been baked into
+    /// a block defn. `None` for non-text entities.
+    pub text_height_local: Option<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -286,6 +293,12 @@ fn tessellate_sub_local(
         wire.points.iter().copied().chain(wire.fill_tris.iter().copied()),
     );
 
+    let text_height_local: Option<f32> = match sub {
+        EntityType::Text(t) => Some((t.height * anno_scale as f64) as f32),
+        EntityType::MText(m) => Some((m.height * anno_scale as f64) as f32),
+        _ => None,
+    };
+
     Some(LocalWire {
         points: wire.points,
         key_vertices: wire.key_vertices,
@@ -302,6 +315,7 @@ fn tessellate_sub_local(
         lt_is_byblock,
         lw_is_byblock,
         aabb_local,
+        text_height_local,
     })
 }
 
@@ -462,6 +476,60 @@ pub fn expand_insert(
         expand_defn(defn, &base_xform, &ctx, &mut batches, &mut visited, 0);
     }
     Some(batches.finalize(&name, selected))
+}
+
+/// Emit a greeked rectangle for a text LocalWire — same color, AABB-sized
+/// fill, no per-glyph stroke geometry. Mirrors the top-level text greek in
+/// scene/mod.rs (including the 0.45 dim pre-boost the face3d pipeline
+/// applies to fill_tris).
+fn emit_greeked_text(lw: &LocalWire, local_aabb: [f32; 4], ctx: &ExpandCtx, out: &mut Batches) {
+    let [x0, y0, x1, y1] = local_aabb;
+    let z = 0.0_f32;
+    let tris = [
+        [x0, y0, z],
+        [x1, y0, z],
+        [x1, y1, z],
+        [x0, y0, z],
+        [x1, y1, z],
+        [x0, y1, z],
+    ];
+
+    let final_color = if ctx.selected {
+        WireModel::SELECTED
+    } else if lw.color_is_byblock {
+        ctx.ins_color
+    } else {
+        lw.color
+    };
+    let boost = 1.0 / 0.45_f32;
+    let [r, g, b, a] = final_color;
+    let greek_color = [
+        (r * boost).min(1.0),
+        (g * boost).min(1.0),
+        (b * boost).min(1.0),
+        a,
+    ];
+
+    let key = style_key(greek_color, 0.0, [0.0; 8], 1.0, lw.aci, true);
+    let entry = out
+        .by_style
+        .entry(key)
+        .or_insert_with(|| BatchEntry::new(greek_color, 0.0, [0.0; 8], 1.0, lw.aci, true));
+    for p in tris {
+        entry.fill_tris.push(p);
+        if p[0] < entry.min_x {
+            entry.min_x = p[0];
+        }
+        if p[1] < entry.min_y {
+            entry.min_y = p[1];
+        }
+        if p[0] > entry.max_x {
+            entry.max_x = p[0];
+        }
+        if p[1] > entry.max_y {
+            entry.max_y = p[1];
+        }
+    }
 }
 
 fn aabb_pixel_size(local_aabb: [f32; 4], world_per_pixel: f32) -> f32 {
@@ -644,6 +712,26 @@ fn expand_defn(
                 if let Some(wpp) = ctx.world_per_pixel {
                     if aabb_pixel_size(local, wpp) < MIN_PIXEL_SIZE {
                         continue;
+                    }
+                    // Text LOD ladder: text inside a block follows the same
+                    // 5 / 10 px cull/greek/full rules as top-level text. We
+                    // have to apply the Insert's transform scale to the
+                    // stored local glyph height to get the screen height.
+                    if let Some(h_local) = lw.text_height_local {
+                        let m = &accum_xform.matrix.m;
+                        let sy = ((m[1][0] * m[1][0]
+                            + m[1][1] * m[1][1]
+                            + m[1][2] * m[1][2]) as f64)
+                            .sqrt() as f32;
+                        let h_world = h_local * sy;
+                        let h_px = h_world / wpp;
+                        if h_px < 5.0 {
+                            continue;
+                        }
+                        if h_px < 10.0 {
+                            emit_greeked_text(lw, local, ctx, out);
+                            continue;
+                        }
                     }
                 }
                 emit_wire(lw, accum_xform, ctx, out);
