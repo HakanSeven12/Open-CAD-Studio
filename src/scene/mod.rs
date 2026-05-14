@@ -4104,10 +4104,11 @@ fn tessellate_entity(
 
     let aabb = entity_aabb(e, world_offset);
 
-    // Text greeking: when a Text/MText entity's projected glyph height
-    // drops below a readable size, replace the per-glyph stroke geometry
-    // with a single filled rectangle in the text's color. Same visual
-    // hint ("text lives here") at a fraction of the tessellation cost.
+    // Text-specific LOD ladder, keyed off the entity's glyph height in
+    // pixels (anno-scaled):
+    //   < 5 px  → drop entirely (illegible, no point even greeking)
+    //   5–10 px → emit a greeked rect in the text's color
+    //   ≥ 10 px → full per-glyph stroke tessellation
     if let Some(wpp) = world_per_pixel {
         let text_height: Option<f64> = match e {
             EntityType::Text(t) => Some(t.height * anno_scale as f64),
@@ -4116,10 +4117,10 @@ fn tessellate_entity(
         };
         if let Some(h_world) = text_height {
             let h_px = (h_world as f32) / wpp;
-            // < 4 px: glyphs aren't readable; emit a greeked rect instead.
-            // We still drew through the LOD floor (entity AABB > 2 px), so
-            // this rect is bigger than 2 px in at least one dimension.
-            if h_px < 4.0 && aabb != WireModel::UNBOUNDED_AABB {
+            if h_px < 5.0 {
+                return vec![];
+            }
+            if h_px < 10.0 && aabb != WireModel::UNBOUNDED_AABB {
                 let [x0, y0, x1, y1] = aabb;
                 let z = match e {
                     EntityType::Text(t) => (t.insertion_point.z - world_offset[2]) as f32,
