@@ -718,6 +718,83 @@ fn emit_greeked_text(
     }
 }
 
+/// Emit a 2-point baseline line for a sub-pixel text LocalWire — same color
+/// resolution as `emit_wire`, but the wire's stored glyph points are
+/// replaced with the OBB's baseline edge (`obb[0] → obb[1]`). Falls back to
+/// a no-op when no OBB is cached (rotation/attachment unknown).
+fn emit_text_baseline(
+    lw: &LocalWire,
+    accum_xform: &Transform,
+    defn_lo: [f64; 3],
+    ctx: &ExpandCtx,
+    out: &mut Batches,
+    wpp: f32,
+) {
+    let Some(obb) = lw.text_obb_local else {
+        return;
+    };
+    let [ox, oy, oz] = ctx.world_offset;
+    let [lo_x, lo_y, lo_z] = defn_lo;
+    let xf = |p: [f32; 3]| -> [f32; 3] {
+        let w = accum_xform.apply(Vector3::new(
+            p[0] as f64 + lo_x,
+            p[1] as f64 + lo_y,
+            p[2] as f64 + lo_z,
+        ));
+        [(w.x - ox) as f32, (w.y - oy) as f32, (w.z - oz) as f32]
+    };
+    let p0 = xf(obb[0]);
+    let p1 = xf(obb[1]);
+
+    // Skip the baseline too if the line itself projects under 2 px on screen.
+    let dx = p1[0] - p0[0];
+    let dy = p1[1] - p0[1];
+    let len_px = (dx * dx + dy * dy).sqrt() / wpp;
+    if len_px < 2.0 {
+        return;
+    }
+
+    let final_color = if ctx.selected {
+        WireModel::SELECTED
+    } else if lw.color_is_byblock {
+        ctx.ins_color
+    } else {
+        lw.color
+    };
+    let final_color = if ctx.is_xref && !ctx.selected {
+        fade_toward_bg(final_color, ctx.bg_color)
+    } else {
+        final_color
+    };
+
+    let key = style_key(final_color, 0.0, [0.0; 8], 1.0, lw.aci, true);
+    let entry = out
+        .by_style
+        .entry(key)
+        .or_insert_with(|| BatchEntry::new(final_color, 0.0, [0.0; 8], 1.0, lw.aci, true));
+
+    let needs_sep = !entry.points.is_empty()
+        && !entry.points.last().map(|p| p[0].is_nan()).unwrap_or(false);
+    if needs_sep {
+        entry.points.push([f32::NAN; 3]);
+    }
+    for q in [p0, p1] {
+        if q[0] < entry.min_x {
+            entry.min_x = q[0];
+        }
+        if q[1] < entry.min_y {
+            entry.min_y = q[1];
+        }
+        if q[0] > entry.max_x {
+            entry.max_x = q[0];
+        }
+        if q[1] > entry.max_y {
+            entry.max_y = q[1];
+        }
+        entry.points.push(q);
+    }
+}
+
 fn aabb_pixel_size(local_aabb: [f32; 4], world_per_pixel: f32) -> f32 {
     let w = (local_aabb[2] - local_aabb[0]).abs();
     let h = (local_aabb[3] - local_aabb[1]).abs();
@@ -918,13 +995,17 @@ fn expand_defn(
                     }
                 }
                 if let Some(wpp) = ctx.world_per_pixel {
-                    if aabb_pixel_size(local, wpp) < MIN_PIXEL_SIZE {
+                    // Text/MText follows its own ladder below (baseline-line
+                    // / greek / full) — must reach it even when the wire's
+                    // AABB falls under MIN_PIXEL_SIZE.
+                    let is_text = lw.text_height_local.is_some();
+                    if !is_text && aabb_pixel_size(local, wpp) < MIN_PIXEL_SIZE {
                         continue;
                     }
                     // Text LOD ladder: text inside a block follows the same
-                    // 5 / 10 px cull/greek/full rules as top-level text. We
-                    // have to apply the Insert's transform scale to the
-                    // stored local glyph height to get the screen height.
+                    // 1 / 5 px baseline/greek/full rules as top-level text.
+                    // We apply the Insert's transform scale to the stored
+                    // local glyph height to get the screen height.
                     if let Some(h_local) = lw.text_height_local {
                         let m = &accum_xform.matrix.m;
                         let sy = ((m[1][0] * m[1][0]
@@ -933,10 +1014,11 @@ fn expand_defn(
                             .sqrt() as f32;
                         let h_world = h_local * sy;
                         let h_px = h_world / wpp;
-                        if h_px < 2.0 {
+                        if h_px < 1.0 {
+                            emit_text_baseline(lw, accum_xform, defn_lo, ctx, out, wpp);
                             continue;
                         }
-                        if h_px < 4.0 {
+                        if h_px < 5.0 {
                             emit_greeked_text(lw, local, accum_xform, defn_lo, ctx, out);
                             continue;
                         }

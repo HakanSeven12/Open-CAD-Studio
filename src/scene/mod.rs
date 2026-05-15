@@ -3913,7 +3913,11 @@ fn tessellate_entity(
                         let w = (ab[2] - ab[0]).abs();
                         let h = (ab[3] - ab[1]).abs();
                         // Keep in sync with `block_cache::MIN_PIXEL_SIZE`.
-                        if w.max(h) / wpp < 5.0 {
+                        // Text/MText have their own LOD ladder below
+                        // (baseline-line / greek / full) and must reach it
+                        // even when projected size is sub-5 px.
+                        let is_text = matches!(e, EntityType::Text(_) | EntityType::MText(_));
+                        if !is_text && w.max(h) / wpp < 5.0 {
                             return vec![];
                         }
                     }
@@ -4131,9 +4135,9 @@ fn tessellate_entity(
 
     // Text-specific LOD ladder, keyed off the entity's glyph height in
     // pixels (anno-scaled):
-    //   < 2 px → drop entirely (illegible, no point even greeking)
-    //   2–4 px → emit a greeked rect in the text's color
-    //   ≥ 4 px → full per-glyph stroke tessellation
+    //   < 1 px  → baseline line in the text's color (text-here hint)
+    //   1–5 px  → greeked OBB rect in the text's color
+    //   ≥ 5 px  → full per-glyph stroke tessellation
     if let Some(wpp) = world_per_pixel {
         let text_height: Option<f64> = match e {
             EntityType::Text(t) => Some(t.height * anno_scale as f64),
@@ -4142,10 +4146,38 @@ fn tessellate_entity(
         };
         if let Some(h_world) = text_height {
             let h_px = (h_world as f32) / wpp;
-            if h_px < 2.0 {
-                return vec![];
+            if h_px < 1.0 {
+                let pts = text_baseline_points(e, anno_scale, world_offset);
+                if pts.len() < 2 {
+                    return vec![];
+                }
+                // Skip the baseline too if the line itself projects under
+                // 2 px (e.g. a 1-char text seen edge-on).
+                let dx = pts[1][0] - pts[0][0];
+                let dy = pts[1][1] - pts[0][1];
+                let len_px = (dx * dx + dy * dy).sqrt() / wpp;
+                if len_px < 2.0 {
+                    return vec![];
+                }
+                return vec![WireModel {
+                    name: h.value().to_string(),
+                    points: pts,
+                    color: entity_color,
+                    selected: sel,
+                    aci,
+                    pattern_length: 0.0,
+                    pattern: [0.0; 8],
+                    line_weight_px: 1.0,
+                    snap_pts: vec![],
+                    tangent_geoms: vec![],
+                    key_vertices: vec![],
+                    aabb,
+                    plinegen: true,
+                    vp_scissor: None,
+                    fill_tris: vec![],
+                }];
             }
-            if h_px < 4.0 && aabb != WireModel::UNBOUNDED_AABB {
+            if h_px < 5.0 && aabb != WireModel::UNBOUNDED_AABB {
                 let fill_tris = text_greek_obb_tris(e, anno_scale, world_offset);
                 // The face3d pipeline dims fill_tris colors to 45% to fake
                 // ambient occlusion on PolyfaceMesh / 3DFACE solids. Greeked
@@ -4333,6 +4365,24 @@ pub(crate) fn text_obb_corners_native(
         rot_pt(x1, y1),
         rot_pt(x0, y1),
     ])
+}
+
+/// Baseline endpoints (`p00 → p10` of the OBB) for a sub-pixel Text / MText,
+/// in world-offset-subtracted f32 space. Used as the lowest LOD step before
+/// the entity is dropped entirely.
+fn text_baseline_points(
+    e: &EntityType,
+    anno_scale: f32,
+    world_offset: [f64; 3],
+) -> Vec<[f32; 3]> {
+    let Some(corners) = text_obb_corners_native(e, anno_scale) else {
+        return vec![];
+    };
+    let [ox, oy, oz] = world_offset;
+    let cast = |p: [f64; 3]| -> [f32; 3] {
+        [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
+    };
+    vec![cast(corners[0]), cast(corners[1])]
 }
 
 /// 6-vertex (2-triangle) fill for a greeked top-level Text / MText, in
