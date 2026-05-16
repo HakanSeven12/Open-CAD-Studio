@@ -44,8 +44,8 @@ use acadrust::types::Vector2;
 use acadrust::{CadDocument, EntityType, Handle, TableEntry};
 use glam;
 use truck_modeling::{
-    base::{BoundedCurve, ParametricCurve},
-    BSplineCurve as TruckBSpline, KnotVec, Point3,
+    base::{BoundedCurve, ParameterDivision1D},
+    BSplineCurve as TruckBSpline, KnotVec, NurbsCurve, Point3, Vector4,
 };
 
 use iced::time::Duration;
@@ -2570,36 +2570,101 @@ impl Scene {
                         }
                     }
                     BoundaryEdge::Spline(spline) => {
-                        // Evaluate the B-spline curve into smooth boundary points.
-                        // Fall back to control-point polyline for degenerate inputs.
-                        let degree = spline.degree as usize;
-                        let cps: Vec<Point3> = spline
-                            .control_points
-                            .iter()
-                            .map(|p| Point3::new(p.x, p.y, 0.0))
-                            .collect();
+                        // DXF spline control_points pack (x, y, weight) into
+                        // a Vector3 — the z field is the rational weight, NOT
+                        // a Z coordinate. The legacy code dropped weight and
+                        // sampled with a fixed 16 segments; both bugs
+                        // produced visibly wrong fill regions for spline-
+                        // bounded hatches (especially block-internal ones,
+                        // where boundaries are often spline curves with
+                        // rational weights and short cubic segments).
+                        //
+                        // Build a NurbsCurve when `rational`, otherwise a
+                        // plain BSplineCurve, and sample adaptively via
+                        // truck's `parameter_division` at the same chord
+                        // tolerance the fill polygon uses for arcs.
+                        let degree = spline.degree.max(0) as usize;
                         let knot_vec = if !spline.knots.is_empty() {
                             KnotVec::from(spline.knots.clone())
-                        } else if cps.len() >= 2 {
-                            KnotVec::uniform_knot(degree, cps.len() - 1)
+                        } else if spline.control_points.len() >= degree + 1 {
+                            KnotVec::uniform_knot(degree, spline.control_points.len() - 1)
                         } else {
                             KnotVec::from(vec![])
                         };
-                        let ok = cps.len() >= 2
+                        let knot_ok = spline.control_points.len() >= 2
                             && degree >= 1
-                            && knot_vec.len() == cps.len() + degree + 1;
-                        if ok {
-                            let bspl = TruckBSpline::new(knot_vec, cps);
-                            let (t0, t1) = bspl.range_tuple();
-                            let segs = 16u32;
-                            for i in 0..=segs {
-                                let t = t0 + (t1 - t0) * (i as f64 / segs as f64);
-                                let p = bspl.subs(t);
-                                boundary.push(to_xy(p.x, p.y));
+                            && knot_vec.len() == spline.control_points.len() + degree + 1;
+
+                        // Rough chord-tolerance: 0.1% of the control-poly
+                        // diagonal so adaptive sampling produces enough
+                        // points to follow the curve without exploding on
+                        // huge splines.
+                        let (mut sp_min_x, mut sp_min_y) = (f64::INFINITY, f64::INFINITY);
+                        let (mut sp_max_x, mut sp_max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+                        for cp in &spline.control_points {
+                            sp_min_x = sp_min_x.min(cp.x);
+                            sp_min_y = sp_min_y.min(cp.y);
+                            sp_max_x = sp_max_x.max(cp.x);
+                            sp_max_y = sp_max_y.max(cp.y);
+                        }
+                        let diag = ((sp_max_x - sp_min_x).powi(2)
+                            + (sp_max_y - sp_min_y).powi(2))
+                        .sqrt();
+                        let tol = tessellate::fill_chord_tol(diag.max(1.0));
+
+                        let mut sampled = false;
+                        if knot_ok {
+                            if spline.rational {
+                                // NURBS: pack (x, y, 0, w) into Vector4.
+                                let cps: Vec<Vector4> = spline
+                                    .control_points
+                                    .iter()
+                                    .map(|p| {
+                                        let w = if p.z.abs() > 1e-12 { p.z } else { 1.0 };
+                                        Vector4::new(p.x * w, p.y * w, 0.0, w)
+                                    })
+                                    .collect();
+                                let bspl = TruckBSpline::new(knot_vec.clone(), cps);
+                                let curve = NurbsCurve::new(bspl);
+                                let (t0, t1) = curve.range_tuple();
+                                let (_, pts) = curve.parameter_division((t0, t1), tol);
+                                for p in pts {
+                                    boundary.push(to_xy(p.x, p.y));
+                                }
+                                sampled = true;
+                            } else {
+                                let cps: Vec<Point3> = spline
+                                    .control_points
+                                    .iter()
+                                    .map(|p| Point3::new(p.x, p.y, 0.0))
+                                    .collect();
+                                let bspl = TruckBSpline::new(knot_vec, cps);
+                                let (t0, t1) = bspl.range_tuple();
+                                let (_, pts) = bspl.parameter_division((t0, t1), tol);
+                                for p in pts {
+                                    boundary.push(to_xy(p.x, p.y));
+                                }
+                                sampled = true;
                             }
-                        } else {
-                            for cp in &spline.control_points {
-                                boundary.push(to_xy(cp.x, cp.y));
+                        }
+                        if !sampled {
+                            // Fallback: prefer fit_points (which lie on the
+                            // curve) over control_points (which usually
+                            // don't). A control-point polyline would draw
+                            // the convex-hull silhouette — visibly wrong.
+                            let pts: &[_] = if !spline.fit_points.is_empty() {
+                                &spline.fit_points
+                            } else {
+                                &[]
+                            };
+                            if !pts.is_empty() {
+                                for p in pts {
+                                    boundary.push(to_xy(p.x, p.y));
+                                }
+                            } else {
+                                for cp in &spline.control_points {
+                                    boundary.push(to_xy(cp.x, cp.y));
+                                }
                             }
                         }
                     }
