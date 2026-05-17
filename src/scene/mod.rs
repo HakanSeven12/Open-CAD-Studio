@@ -15,6 +15,14 @@ pub mod paper_canvas;
 pub mod pipeline;
 pub mod properties;
 pub mod quadtree;
+
+/// Result of `Scene::entity_index()`. The wire path queries `tree` for
+/// view-rect candidates and also always emits `unbounded_handles`
+/// (entities with no usable bbox — legacy `UNBOUNDED_AABB` sentinel).
+pub(super) struct EntityIndex {
+    pub tree: quadtree::QuadTree,
+    pub unbounded_handles: Vec<Handle>,
+}
 mod render;
 mod selection;
 pub mod solid3d_tess;
@@ -476,11 +484,11 @@ pub struct Scene {
     /// Lets Insert tessellation transform-copy cached wires instead of
     /// clone+explode+re-tessellate per reference.
     block_defn_cache: RefCell<Option<(u64, Arc<block_cache::BlockCache>)>>,
-    /// Spatial index of top-level entity AABBs in WCS f64 (Phase 2.1).
-    /// Keyed by geometry_epoch; lazily rebuilt by `entity_index()`. Skips
-    /// `Insert`/`Viewport`/`Block`/`BlockEnd` and entities with no usable
-    /// bbox — those are handled by special-case "always emit" iteration.
-    entity_index_cache: RefCell<Option<(u64, quadtree::QuadTree)>>,
+    /// Spatial index + always-emit list for top-level entities
+    /// (Phase 2.1). Lazily rebuilt by `entity_index()` on
+    /// `geometry_epoch` change. See `EntityIndex` for what each side
+    /// holds and why both are needed.
+    entity_index_cache: RefCell<Option<(u64, EntityIndex)>>,
     /// Last viewport aspect ratio captured by the render pipeline. Used by
     /// `view_world_aabb` to compute the world-space view rect on demand.
     last_render_aspect: std::cell::Cell<f32>,
@@ -1280,11 +1288,12 @@ impl Scene {
                 local_view[2] as f64 + ox,
                 local_view[3] as f64 + oy,
             ];
-            let candidates: Vec<Handle> = {
-                let tree = self.entity_index();
-                tree.query_rect(view_wcs)
+            let (candidates, unbounded): (Vec<Handle>, Vec<Handle>) = {
+                let idx = self.entity_index();
+                (idx.tree.query_rect(view_wcs), idx.unbounded_handles.clone())
             };
-            let mut out: Vec<&EntityType> = Vec::with_capacity(candidates.len() + 16);
+            let mut out: Vec<&EntityType> =
+                Vec::with_capacity(candidates.len() + unbounded.len() + 16);
             for h in candidates {
                 if let Some(e) = self.document.get_entity(h) {
                     if visibility_ok(e) {
@@ -1292,6 +1301,17 @@ impl Scene {
                     }
                 }
             }
+            // Unbounded entities — always emit regardless of view, mirroring
+            // legacy `entity_aabb`'s UNBOUNDED_AABB sentinel.
+            for h in unbounded {
+                if let Some(e) = self.document.get_entity(h) {
+                    if visibility_ok(e) {
+                        out.push(e);
+                    }
+                }
+            }
+            // Inserts/Viewports/Block/BlockEnd — handled by their own paths
+            // (block expansion, viewport rendering); always candidates.
             for e in self.document.entities() {
                 if is_unindexable_entity(e) && visibility_ok(e) {
                     out.push(e);
@@ -1457,13 +1477,18 @@ impl Scene {
         })
     }
 
-    /// Spatial index of every indexable top-level entity. Lazily built
-    /// on first call after a geometry change; reused across queries
-    /// until `geometry_epoch` advances. Entities filtered out by
-    /// `is_unindexable_entity` (Insert/Viewport/Block/BlockEnd) and
-    /// entities with no usable bbox don't appear here — callers must
-    /// iterate those separately.
-    pub(super) fn entity_index(&self) -> std::cell::Ref<'_, quadtree::QuadTree> {
+    /// Spatial index + always-emit list for top-level entities. Lazily
+    /// rebuilt on `geometry_epoch` change.
+    ///
+    /// `tree` holds entities whose `bounding_box()` is finite and
+    /// non-degenerate. `unbounded_handles` holds entities whose bbox
+    /// is degenerate or non-finite — the legacy `entity_aabb` treated
+    /// those as `UNBOUNDED_AABB` (never culled), so the wire path must
+    /// always emit them regardless of view. Inserts/Viewports/Blocks
+    /// /BlockEnds are filtered out at build time and re-added by the
+    /// wire path via a separate scan (their WCS bbox depends on
+    /// transforms handled elsewhere).
+    pub(super) fn entity_index(&self) -> std::cell::Ref<'_, EntityIndex> {
         {
             let cache = self.entity_index_cache.borrow();
             if let Some((epoch, _)) = *cache {
@@ -1476,30 +1501,28 @@ impl Scene {
             }
         }
 
-        // Pass 1 — collect (handle, aabb) for every indexable entity.
-        // Union them to derive a tight root bound; anything with a
-        // non-finite or degenerate bbox is skipped here, so the root
-        // bounds stay finite. Wide margin (1%) avoids items sitting
-        // exactly on the root edge.
         let mut items: Vec<(Handle, [f64; 4])> = Vec::new();
+        let mut unbounded: Vec<Handle> = Vec::new();
         let mut union: Option<[f64; 4]> = None;
         for e in self.document.entities() {
             if is_unindexable_entity(e) {
                 continue;
             }
-            let Some(ab) = entity_world_aabb_f64(e) else {
-                continue;
-            };
-            union = Some(match union {
-                None => ab,
-                Some(u) => [
-                    u[0].min(ab[0]),
-                    u[1].min(ab[1]),
-                    u[2].max(ab[2]),
-                    u[3].max(ab[3]),
-                ],
-            });
-            items.push((e.common().handle, ab));
+            match entity_world_aabb_f64(e) {
+                Some(ab) => {
+                    union = Some(match union {
+                        None => ab,
+                        Some(u) => [
+                            u[0].min(ab[0]),
+                            u[1].min(ab[1]),
+                            u[2].max(ab[2]),
+                            u[3].max(ab[3]),
+                        ],
+                    });
+                    items.push((e.common().handle, ab));
+                }
+                None => unbounded.push(e.common().handle),
+            }
         }
         let root = match union {
             Some(u) => {
@@ -1509,8 +1532,6 @@ impl Scene {
                 let my = h * 0.01;
                 [u[0] - mx, u[1] - my, u[2] + mx, u[3] + my]
             }
-            // Empty doc — pick a small finite root; query_rect on an
-            // empty tree returns nothing regardless.
             None => [-1.0, -1.0, 1.0, 1.0],
         };
         let mut tree = quadtree::QuadTree::new(root);
@@ -1518,7 +1539,13 @@ impl Scene {
             tree.insert(h, ab);
         }
 
-        *self.entity_index_cache.borrow_mut() = Some((self.geometry_epoch, tree));
+        *self.entity_index_cache.borrow_mut() = Some((
+            self.geometry_epoch,
+            EntityIndex {
+                tree,
+                unbounded_handles: unbounded,
+            },
+        ));
         std::cell::Ref::map(self.entity_index_cache.borrow(), |c| {
             &c.as_ref().unwrap().1
         })
