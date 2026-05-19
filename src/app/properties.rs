@@ -274,6 +274,83 @@ impl H7CAD {
 
         self.tabs[i].properties = new_panel;
         self.refresh_selected_grips();
+        self.sync_ribbon_from_selection();
+    }
+
+    /// Drive the Home-ribbon Layer / Color / Linetype / Lineweight dropdowns
+    /// from the current entity selection. With no selection the ribbon falls
+    /// back to the active creation defaults (per-tab active_layer + ByLayer).
+    /// Mixed selections keep the prior value (we'd need a UI "*Varies*"
+    /// marker to do better).
+    pub(super) fn sync_ribbon_from_selection(&mut self) {
+        let i = self.active_tab;
+        let selected = self.tabs[i].scene.selected_entities();
+        if selected.is_empty() {
+            let layer = self.tabs[i].active_layer.clone();
+            self.ribbon.active_layer = layer;
+            self.ribbon.active_color = acadrust::types::Color::ByLayer;
+            self.ribbon.active_linetype = "ByLayer".to_string();
+            self.ribbon.active_lineweight = acadrust::types::LineWeight::ByLayer;
+            return;
+        }
+
+        let mut layer: Option<String> = None;
+        let mut color: Option<acadrust::types::Color> = None;
+        let mut linetype: Option<String> = None;
+        let mut lineweight: Option<acadrust::types::LineWeight> = None;
+        let mut layer_mixed = false;
+        let mut color_mixed = false;
+        let mut linetype_mixed = false;
+        let mut lineweight_mixed = false;
+
+        for (_h, e) in &selected {
+            let c = e.common();
+            let lt = if c.linetype.is_empty() {
+                "ByLayer".to_string()
+            } else {
+                c.linetype.clone()
+            };
+            match &layer {
+                None => layer = Some(c.layer.clone()),
+                Some(prev) if prev != &c.layer => layer_mixed = true,
+                _ => {}
+            }
+            match &color {
+                None => color = Some(c.color),
+                Some(prev) if prev != &c.color => color_mixed = true,
+                _ => {}
+            }
+            match &linetype {
+                None => linetype = Some(lt),
+                Some(prev) if prev != &lt => linetype_mixed = true,
+                _ => {}
+            }
+            match &lineweight {
+                None => lineweight = Some(c.line_weight),
+                Some(prev) if prev != &c.line_weight => lineweight_mixed = true,
+                _ => {}
+            }
+        }
+        if !layer_mixed {
+            if let Some(l) = layer {
+                self.ribbon.active_layer = l;
+            }
+        }
+        if !color_mixed {
+            if let Some(c) = color {
+                self.ribbon.active_color = c;
+            }
+        }
+        if !linetype_mixed {
+            if let Some(l) = linetype {
+                self.ribbon.active_linetype = l;
+            }
+        }
+        if !lineweight_mixed {
+            if let Some(lw) = lineweight {
+                self.ribbon.active_lineweight = lw;
+            }
+        }
     }
 
     /// Rebuild the cached selected_grips from the current entity selection.
