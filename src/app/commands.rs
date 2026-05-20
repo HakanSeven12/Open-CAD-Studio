@@ -2348,6 +2348,181 @@ impl H7CAD {
                 self.command_line.push_info("Opening Patreon page...");
             }
 
+            // ── DWGPROPS — print round-trip-only HeaderVariables ─────────
+            // No UI dialog for these yet; the command surfaces them so
+            // users can confirm the values that the parser populated and
+            // the writer will round-trip on save.
+            "DWGPROPS" | "DWGPROP" => {
+                let i = self.active_tab;
+                let h = &self.tabs[i].scene.document.header;
+                let path_label = self.tabs[i]
+                    .current_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "(unsaved)".to_string());
+                self.command_line
+                    .push_output(&format!("Drawing: {}", path_label));
+                self.command_line.push_output(&format!(
+                    "  Created (Julian):  {:.6}",
+                    h.create_date_julian
+                ));
+                self.command_line.push_output(&format!(
+                    "  Updated (Julian):  {:.6}",
+                    h.update_date_julian
+                ));
+                self.command_line.push_output(&format!(
+                    "  Total edit time:   {:.4}",
+                    h.total_editing_time
+                ));
+                self.command_line.push_output(&format!(
+                    "  User elapsed:      {:.4}",
+                    h.user_elapsed_time
+                ));
+                self.command_line.push_output(&format!(
+                    "  Last saved by:     {}",
+                    if h.last_saved_by.is_empty() {
+                        "(unknown)"
+                    } else {
+                        &h.last_saved_by
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Fingerprint GUID:  {}",
+                    if h.fingerprint_guid.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.fingerprint_guid
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Version GUID:      {}",
+                    if h.version_guid.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.version_guid
+                    }
+                ));
+                self.command_line
+                    .push_output(&format!("  Code page:         {}", h.code_page));
+                self.command_line.push_output(&format!(
+                    "  Menu name:         {}",
+                    if h.menu_name.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.menu_name
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Hyperlink base:    {}",
+                    if h.hyperlink_base.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.hyperlink_base
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Project name:      {}",
+                    if h.project_name.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.project_name
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Stylesheet:        {}",
+                    if h.stylesheet.is_empty() {
+                        "(none)"
+                    } else {
+                        &h.stylesheet
+                    }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Required versions: {:#018x}",
+                    h.required_versions
+                ));
+                self.command_line.push_output(&format!(
+                    "  Measurement:       {} ({})",
+                    h.measurement,
+                    if h.measurement == 1 { "Metric" } else { "Imperial" }
+                ));
+                self.command_line.push_output(&format!(
+                    "  Proxy graphics:    {}",
+                    h.proxy_graphics
+                ));
+                self.command_line
+                    .push_output(&format!("  Tree depth:        {}", h.tree_depth));
+                self.command_line.push_output(&format!(
+                    "  User vars (int):   {} {} {} {} {}",
+                    h.user_int1, h.user_int2, h.user_int3, h.user_int4, h.user_int5
+                ));
+                self.command_line.push_output(&format!(
+                    "  User vars (real):  {:.6} {:.6} {:.6} {:.6} {:.6}",
+                    h.user_real1, h.user_real2, h.user_real3, h.user_real4, h.user_real5
+                ));
+                self.command_line.push_output(&format!(
+                    "  User timer:        {}",
+                    if h.user_timer { "On" } else { "Off" }
+                ));
+            }
+
+            // Edit a USERI1..USERI5 / USERR1..USERR5 slot. Lets the user
+            // store drawing-scoped scalars (and save them through round-trip)
+            // even though we don't have a LISP / DIESEL runtime yet.
+            //   USERI 1 42        → header.user_int1 = 42
+            //   USERR 3 1.5e-3    → header.user_real3 = 0.0015
+            cmd if cmd.starts_with("USERI") || cmd.starts_with("USERR") => {
+                let is_real = cmd.starts_with("USERR");
+                let rest = if is_real {
+                    cmd.trim_start_matches("USERR").trim()
+                } else {
+                    cmd.trim_start_matches("USERI").trim()
+                };
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                let slot: Option<usize> = parts.first().and_then(|s| s.parse().ok());
+                let value = parts.get(1).copied().unwrap_or("").trim();
+                let i = self.active_tab;
+                let h = &mut self.tabs[i].scene.document.header;
+                match (slot, value, is_real) {
+                    (Some(n @ 1..=5), v, true) => {
+                        if let Ok(val) = v.parse::<f64>() {
+                            match n {
+                                1 => h.user_real1 = val,
+                                2 => h.user_real2 = val,
+                                3 => h.user_real3 = val,
+                                4 => h.user_real4 = val,
+                                _ => h.user_real5 = val,
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line
+                                .push_output(&format!("USERR{n} = {val}"));
+                        } else {
+                            self.command_line
+                                .push_info("Usage: USERR <1-5> <real>");
+                        }
+                    }
+                    (Some(n @ 1..=5), v, false) => {
+                        if let Ok(val) = v.parse::<i16>() {
+                            match n {
+                                1 => h.user_int1 = val,
+                                2 => h.user_int2 = val,
+                                3 => h.user_int3 = val,
+                                4 => h.user_int4 = val,
+                                _ => h.user_int5 = val,
+                            }
+                            self.tabs[i].dirty = true;
+                            self.command_line
+                                .push_output(&format!("USERI{n} = {val}"));
+                        } else {
+                            self.command_line
+                                .push_info("Usage: USERI <1-5> <integer>");
+                        }
+                    }
+                    _ => self
+                        .command_line
+                        .push_info("Usage: USERI <1-5> <int> | USERR <1-5> <real>"),
+                }
+            }
+
             "REPORT" => {
                 let _ = open::that("https://github.com/HakanSeven12/H7CAD/issues/new");
                 self.command_line.push_info("Opening GitHub issue page...");
