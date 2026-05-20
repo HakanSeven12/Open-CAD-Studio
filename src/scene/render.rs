@@ -95,6 +95,9 @@ pub struct Primitive {
     /// Background color used to clear the MSAA buffer at the start of each frame.
     pub(super) bg_color: [f32; 4],
     pub(super) show_viewcube: bool,
+    /// Header.fill_mode (FILLMODE): when false, hatch / wipeout / face3d-fill
+    /// uploads short-circuit so the renderer draws only wireframe.
+    pub(super) fill_mode: bool,
     pub(super) geometry_epoch: u64,
     /// Camera generation captured when this Primitive was assembled. Paired
     /// with `geometry_epoch` so the wire buffers re-upload when the view
@@ -128,19 +131,30 @@ impl shader::Primitive for Primitive {
         pipeline.viewcube.ensure_depth_texture(device, full_size);
         pipeline.upload_uniforms(queue, &self.uniforms);
         let cur_key = (self.geometry_epoch, self.camera_generation);
+        let fill_mode = self.fill_mode;
         if cur_key != pipeline.cached_epoch {
             // Static buffers (hatches/images/meshes) only need refresh on a
             // real geometry change, not on every camera tick.
             if self.geometry_epoch != pipeline.cached_epoch.0 {
-                pipeline.upload_hatches(device, &self.hatches[..]);
-                pipeline.upload_wipeouts(device, &self.wipeout_hatches[..]);
+                if fill_mode {
+                    pipeline.upload_hatches(device, &self.hatches[..]);
+                    pipeline.upload_wipeouts(device, &self.wipeout_hatches[..]);
+                } else {
+                    pipeline.upload_hatches(device, &[]);
+                    pipeline.upload_wipeouts(device, &[]);
+                }
                 pipeline.upload_images(device, queue, &self.images[..]);
                 pipeline.upload_meshes(device, &self.meshes[..]);
             }
             // Wires re-upload on every camera change because the visible
             // subset shifts under frustum culling.
             pipeline.upload_wires(device, &self.wires[..]);
-            pipeline.upload_face3d(device, &self.face3d_wires[..], &self.wires[..]);
+            if fill_mode {
+                pipeline.upload_face3d(device, &self.face3d_wires[..], &self.wires[..]);
+            } else {
+                // Edges still need to draw, but no fill_tris are forwarded.
+                pipeline.upload_face3d(device, &self.face3d_wires[..], &[]);
+            }
             pipeline.cached_epoch = cur_key;
         }
         pipeline.compute_wire_scissors(self.uniforms.view_proj, clip_size.width, clip_size.height);
@@ -239,20 +253,27 @@ pub(super) fn render_style_for(
     let (pattern_length, pattern) = resolve_pattern(&document.line_types, lt_name, lt_scale);
 
     let line_weight_px = {
-        let ew = &e.common().line_weight;
-        let resolved = match ew {
-            LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => document
-                .layers
-                .get(layer_name)
-                .map(|l| &l.line_weight)
-                .unwrap_or(&LineWeight::Default),
-            _ => ew,
-        };
-        const MM_TO_PX: f32 = 96.0 / 25.4;
-        resolved
-            .millimeters()
-            .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
-            .unwrap_or(1.0)
+        // LWDISPLAY (header.lineweight_display): when false, every entity
+        // draws at the 1-pixel base width regardless of its assigned weight.
+        // AutoCAD's "Show Lineweight" toggle maps onto this header var.
+        if !document.header.lineweight_display {
+            1.0
+        } else {
+            let ew = &e.common().line_weight;
+            let resolved = match ew {
+                LineWeight::ByLayer | LineWeight::ByBlock | LineWeight::Default => document
+                    .layers
+                    .get(layer_name)
+                    .map(|l| &l.line_weight)
+                    .unwrap_or(&LineWeight::Default),
+                _ => ew,
+            };
+            const MM_TO_PX: f32 = 96.0 / 25.4;
+            resolved
+                .millimeters()
+                .map(|mm| (mm as f32 * MM_TO_PX).max(1.0))
+                .unwrap_or(1.0)
+        }
     };
 
     (entity_color, pattern_length, pattern, line_weight_px, aci)
@@ -360,6 +381,7 @@ impl Scene {
             hover_region,
             bg_color,
             show_viewcube,
+            fill_mode: self.document.header.fill_mode,
             geometry_epoch: self.geometry_epoch,
             camera_generation: self.camera_generation,
         }
@@ -403,6 +425,7 @@ impl Scene {
             hover_region,
             bg_color: self.bg_color,
             show_viewcube: false,
+            fill_mode: self.document.header.fill_mode,
             geometry_epoch: self.geometry_epoch,
             camera_generation: self.camera_generation,
         }

@@ -3505,6 +3505,34 @@ impl Scene {
         } else {
             [0.0; 3]
         };
+        // MIRRTEXT (header.mirror_text): when false AutoCAD positions text /
+        // mtext / shape by the mirror but keeps the original rotation +
+        // oblique so the text stays right-reading. Capture before the
+        // transform and re-apply afterwards.
+        let preserve_text_orientation =
+            matches!(t, EntityTransform::Mirror { .. }) && !self.document.header.mirror_text;
+        let mut text_orient_backup: Vec<(Handle, f64, f64, f64)> = Vec::new();
+        if preserve_text_orientation {
+            for &h in handles {
+                if let Some(entity) = self.document.get_entity(h) {
+                    match entity {
+                        EntityType::Text(t) => {
+                            text_orient_backup.push((h, t.rotation, t.oblique_angle, 0.0))
+                        }
+                        EntityType::MText(m) => {
+                            text_orient_backup.push((h, m.rotation, 0.0, 0.0))
+                        }
+                        EntityType::Shape(s) => text_orient_backup.push((
+                            h,
+                            s.rotation,
+                            s.oblique_angle,
+                            s.relative_x_scale,
+                        )),
+                        _ => {}
+                    }
+                }
+            }
+        }
         for &h in handles {
             if let Some(entity) = self.document.get_entity_mut(h) {
                 dispatch::apply_transform(entity, t);
@@ -3518,6 +3546,27 @@ impl Scene {
                 };
                 if let Some(model) = new_model {
                     self.hatches.insert(h, model);
+                }
+            }
+        }
+        if preserve_text_orientation {
+            for (h, rot, oblique, x_scale) in text_orient_backup {
+                if let Some(entity) = self.document.get_entity_mut(h) {
+                    match entity {
+                        EntityType::Text(t) => {
+                            t.rotation = rot;
+                            t.oblique_angle = oblique;
+                        }
+                        EntityType::MText(m) => {
+                            m.rotation = rot;
+                        }
+                        EntityType::Shape(s) => {
+                            s.rotation = rot;
+                            s.oblique_angle = oblique;
+                            s.relative_x_scale = x_scale;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -5150,8 +5199,17 @@ fn append_insert_attribute_wires(
     if ins.attributes.is_empty() {
         return;
     }
+    // ATTMODE (header.attribute_visibility):
+    //   0 = Off    — every attribute hidden
+    //   1 = Normal — honour per-attribute `invisible` flag (default)
+    //   2 = On     — every attribute forced visible, ignoring its flag
+    let attmode = document.header.attribute_visibility;
+    if attmode == 0 {
+        return;
+    }
     for attr in &ins.attributes {
-        if attr.common.invisible || attr.flags.invisible {
+        let per_attr_hidden = attr.common.invisible || attr.flags.invisible;
+        if attmode == 1 && per_attr_hidden {
             continue;
         }
         let attr_entity = EntityType::AttributeEntity(attr.clone());

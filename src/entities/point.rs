@@ -9,19 +9,124 @@ use crate::scene::acad_to_truck::{TruckEntity, TruckObject};
 use crate::scene::object::{GripApply, GripDef, PropSection};
 use crate::scene::wire_model::SnapHint;
 
-fn to_truck(pt: &Point) -> TruckEntity {
+/// Resolve PDSIZE (negative = % of viewport, 0 = 5% default, positive = world).
+/// We don't know the viewport height at tessellation time, so percentages and
+/// the 0 default expand to a small fixed world size as a best-effort fallback.
+fn pdsize_world(pdsize: f64) -> f64 {
+    if pdsize > 0.0 {
+        pdsize
+    } else {
+        // Both PDSIZE = 0 and negative (relative) fall back to a sensible
+        // visible default until viewport-aware sizing is wired up.
+        2.0
+    }
+}
+
+fn point_glyph(cx: f64, cy: f64, z: f64, pdmode: i16, pdsize: f64) -> Vec<[f64; 3]> {
+    // PDMODE bits:
+    //   shape:  0=dot, 1=nothing, 2='+', 3='×', 4='|'
+    //   +32   = enclose in a circle
+    //   +64   = enclose in a square
+    //   (+96 = both)
+    let shape = (pdmode & 0x0F) as i32;
+    let circle = (pdmode & 32) != 0;
+    let square = (pdmode & 64) != 0;
+    let s = pdsize_world(pdsize) * 0.5;
+    let nan = [f64::NAN, f64::NAN, f64::NAN];
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let mut push_seg = |a: [f64; 3], b: [f64; 3]| {
+        if !pts.is_empty() {
+            pts.push(nan);
+        }
+        pts.push(a);
+        pts.push(b);
+    };
+    match shape {
+        // 0 = single dot — emit a tiny "+" so it's visible at any zoom.
+        0 => {
+            let d = s * 0.05;
+            push_seg([cx - d, cy, z], [cx + d, cy, z]);
+            push_seg([cx, cy - d, z], [cx, cy + d, z]);
+        }
+        1 => {} // explicit nothing
+        2 => {
+            push_seg([cx - s, cy, z], [cx + s, cy, z]);
+            push_seg([cx, cy - s, z], [cx, cy + s, z]);
+        }
+        3 => {
+            push_seg([cx - s, cy - s, z], [cx + s, cy + s, z]);
+            push_seg([cx - s, cy + s, z], [cx + s, cy - s, z]);
+        }
+        4 => {
+            push_seg([cx, cy - s, z], [cx, cy + s, z]);
+        }
+        _ => {
+            push_seg([cx - s, cy, z], [cx + s, cy, z]);
+            push_seg([cx, cy - s, z], [cx, cy + s, z]);
+        }
+    }
+    if circle {
+        // 16-segment polyline circle.
+        const N: usize = 16;
+        let mut ring: Vec<[f64; 3]> = Vec::with_capacity(N + 1);
+        for i in 0..=N {
+            let a = i as f64 * std::f64::consts::TAU / N as f64;
+            ring.push([cx + a.cos() * s, cy + a.sin() * s, z]);
+        }
+        if !pts.is_empty() {
+            pts.push(nan);
+        }
+        pts.extend(ring);
+    }
+    if square {
+        let p1 = [cx - s, cy - s, z];
+        let p2 = [cx + s, cy - s, z];
+        let p3 = [cx + s, cy + s, z];
+        let p4 = [cx - s, cy + s, z];
+        if !pts.is_empty() {
+            pts.push(nan);
+        }
+        pts.extend_from_slice(&[p1, p2, p3, p4, p1]);
+    }
+    pts
+}
+
+fn to_truck(pt: &Point, document: &acadrust::CadDocument) -> TruckEntity {
     let normal = (pt.normal.x, pt.normal.y, pt.normal.z);
     let (wx, wy, wz) = crate::scene::transform::ocs_point_to_wcs(
         (pt.location.x, pt.location.y, pt.location.z),
         normal,
     );
-    let p = Point3::new(wx, wy, wz);
     let snap = Vec3::new(wx as f32, wy as f32, wz as f32);
+    let pdmode = document.header.point_display_mode;
+    let pdsize = document.header.point_display_size;
+    if pdmode == 0 {
+        // Default: a single vertex (driver handles the dot pixel).
+        let p = Point3::new(wx, wy, wz);
+        return TruckEntity {
+            object: TruckObject::Point(builder::vertex(p)),
+            snap_pts: vec![(snap, SnapHint::Node)],
+            tangent_geoms: vec![],
+            key_vertices: vec![],
+            fill_tris: vec![],
+        };
+    }
+    let pts = point_glyph(wx, wy, wz, pdmode, pdsize);
+    if pts.is_empty() {
+        // PDMODE 1 = nothing — emit an empty Lines wire so picking still works.
+        return TruckEntity {
+            object: TruckObject::Lines(vec![]),
+            snap_pts: vec![(snap, SnapHint::Node)],
+            tangent_geoms: vec![],
+            key_vertices: vec![[wx, wy, wz]],
+            fill_tris: vec![],
+        };
+    }
     TruckEntity {
-        object: TruckObject::Point(builder::vertex(p)),
+        object: TruckObject::Lines(pts),
         snap_pts: vec![(snap, SnapHint::Node)],
         tangent_geoms: vec![],
-        key_vertices: vec![],
+        key_vertices: vec![[wx, wy, wz]],
         fill_tris: vec![],
     }
 }
@@ -85,8 +190,8 @@ fn apply_transform(pt: &mut Point, t: &EntityTransform) {
 }
 
 impl TruckConvertible for Point {
-    fn to_truck(&self, _document: &acadrust::CadDocument) -> Option<TruckEntity> {
-        Some(to_truck(self))
+    fn to_truck(&self, document: &acadrust::CadDocument) -> Option<TruckEntity> {
+        Some(to_truck(self, document))
     }
 }
 
