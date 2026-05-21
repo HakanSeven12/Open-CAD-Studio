@@ -31,10 +31,7 @@ impl CadModule for HomeModule {
             angular_dim, leader_cmd, linear_dim, mleader_cmd, mtext, radius_dim, text,
         };
         use crate::modules::insert::{create_block, insert_block};
-        use about;
-        use changelog;
         use clipboard::{copy_clip, cut, paste};
-        use donate;
         use draw::{arc, circle, ellipse, hatch, line, polyline, shapes};
         use groups::{group, ungroup};
         use layers::{
@@ -45,7 +42,6 @@ impl CadModule for HomeModule {
             translate, trim,
         };
         use properties::match_prop;
-        use report;
 
         vec![
             RibbonGroup {
@@ -223,15 +219,8 @@ impl CadModule for HomeModule {
                     cut::tool().into(),
                 ],
             },
-            RibbonGroup {
-                title: "Support",
-                tools: vec![
-                    RibbonItem::LargeTool(donate::tool()),
-                    report::tool().into(),
-                    about::tool().into(),
-                    changelog::tool().into(),
-                ],
-            },
+            // Support group lives on the Start tab now (see view.rs:
+            // start_page_view). Removed from the Home ribbon to declutter.
         ]
     }
 }

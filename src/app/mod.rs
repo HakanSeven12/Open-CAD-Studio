@@ -282,6 +282,11 @@ pub enum Message {
     /// File picker returned. `Some((path, size_in_bytes))` → start loading;
     /// `None` → user cancelled the dialog (no overlay shown).
     OpenPathPicked(Option<(PathBuf, u64)>),
+    /// Open a path from the Start tab's recent-documents list (skips the
+    /// file picker; the path is already known).
+    OpenRecent(PathBuf),
+    /// Drop a path from the recent-documents list.
+    RecentRemove(PathBuf),
     /// User clicked Cancel on the loading overlay. The parser thread keeps
     /// running but its result is discarded.
     OpenCancel,
@@ -688,14 +693,19 @@ pub enum Message {
 
 impl H7CAD {
     fn new() -> Self {
-        let first_tab = DocumentTab::new_drawing(1);
+        // Boot with only the Welcome/Start tab. The user creates drawings
+        // explicitly (File → New); we never auto-spawn Drawing1.
+        let start_tab = DocumentTab::new_start();
+        let mut app_menu = AppMenu::new();
+        // Restore recents from disk so the Start page lists them across runs.
+        app_menu.load_persistent_recents();
         let mut app = Self {
             start: Instant::now(),
-            tabs: vec![first_tab],
+            tabs: vec![start_tab],
             active_tab: 0,
-            tab_counter: 1,
+            tab_counter: 0,
             ribbon: Ribbon::new(),
-            app_menu: AppMenu::new(),
+            app_menu,
             command_line: CommandLine::new(),
             status_bar: StatusBar::new(),
             cursor_pos: Point::ORIGIN,

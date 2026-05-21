@@ -57,6 +57,27 @@ impl H7CAD {
 
             Message::OpenPathPicked(None) => Task::none(),
 
+            Message::OpenRecent(path) => {
+                // Recents are read from disk every save → the path may be
+                // stale. Skip silently if the file no longer exists; the
+                // entry stays in the list so the user can clean it up.
+                match std::fs::metadata(&path) {
+                    Ok(m) => self.update(Message::OpenPathPicked(Some((path, m.len())))),
+                    Err(_) => {
+                        self.command_line.push_error(&format!(
+                            "Recent file no longer exists: {}",
+                            path.display()
+                        ));
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::RecentRemove(path) => {
+                self.app_menu.remove_recent(&path);
+                Task::none()
+            }
+
             Message::OpenPathPicked(Some((path, size_bytes))) => {
                 let name = path
                     .file_name()
@@ -107,7 +128,8 @@ impl H7CAD {
 
                 let current_is_empty = {
                     let t = &self.tabs[self.active_tab];
-                    t.current_path.is_none()
+                    !t.is_start
+                        && t.current_path.is_none()
                         && !t.dirty
                         && self.tabs[self.active_tab].scene.document.entities().count() == 0
                 };
@@ -754,13 +776,21 @@ impl H7CAD {
             }
 
             Message::TabClose(idx) => {
+                // Start tab is fixed — close requests on it are no-ops.
+                if self.tabs.get(idx).map_or(false, |t| t.is_start) {
+                    return Task::none();
+                }
                 if self.tabs.get(idx).map_or(false, |t| t.dirty) {
                     self.pending_close = Some(super::PendingClose::Tab(idx));
                     return self.open_unsaved_dialog_window();
                 }
+                // Only-tab case: when the lone non-start tab closes, fall
+                // back to the Start tab if it exists; otherwise spawn a
+                // fresh blank drawing (legacy behaviour).
                 if self.tabs.len() == 1 {
                     self.tab_counter += 1;
-                    self.tabs[0] = super::document::DocumentTab::new_drawing(self.tab_counter);
+                    self.tabs[0] =
+                        super::document::DocumentTab::new_drawing(self.tab_counter);
                     self.active_tab = 0;
                 } else {
                     self.tabs.remove(idx);

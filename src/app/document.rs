@@ -44,6 +44,11 @@ pub(super) struct DocumentTab {
     pub(super) active_mleader_style: String,
     /// Last camera_generation value written back to the document.
     pub(super) last_synced_camera_gen: u64,
+    /// Sentinel "Welcome / Start" tab. Always at index 0 when present.
+    /// Cannot be closed; the viewport area renders a welcome page instead
+    /// of the model-space shader. The scene is still constructed so the
+    /// rest of the code can treat it as a normal tab when reading.
+    pub(super) is_start: bool,
 }
 
 impl DocumentTab {
@@ -86,7 +91,18 @@ impl DocumentTab {
             refedit_session: None,
             active_mleader_style: "Standard".to_string(),
             last_synced_camera_gen: 0,
+            is_start: false,
         }
+    }
+
+    /// Welcome / Start tab. Carries a dummy Scene so the rest of the app
+    /// can read tab state uniformly; the viewport renderer detects
+    /// `is_start` and shows a welcome page instead.
+    pub(super) fn new_start() -> Self {
+        let mut t = Self::new_drawing(0);
+        t.tab_title = "Start".to_string();
+        t.is_start = true;
+        t
     }
 
     pub(super) fn tab_display_name(&self) -> String {

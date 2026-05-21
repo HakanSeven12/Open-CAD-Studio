@@ -226,7 +226,13 @@ impl H7CAD {
         let i = self.active_tab;
         let tab = &self.tabs[i];
         let is_paper = tab.scene.current_layout != "Model";
-        let viewport_3d: Element<'_, Message> = if is_paper {
+        // Start tab: render welcome page in place of the model/paper canvas.
+        // Surrounding chrome (tab bar, status bar) stays; the welcome widget
+        // returned here also flags the rest of `view` to skip drawing-only
+        // overlays via `tab.is_start`.
+        let viewport_3d: Element<'_, Message> = if tab.is_start {
+            start_page_view()
+        } else if is_paper {
             paper_canvas_view(tab)
         } else {
             shader(ViewportPane::model(&tab.scene, self.show_viewcube))
@@ -414,22 +420,37 @@ impl H7CAD {
                 None
             };
 
-        let mut viewport_stack = stack![
-            container(viewport_3d)
+        let mut viewport_stack = if tab.is_start {
+            // Start tab: only the welcome widget over a flat background.
+            // Skip every drawing-only overlay (selection markers, snap info,
+            // mouse-area capturing draw clicks, viewcube, nav toolbar, …).
+            stack![container(viewport_3d)
                 .style(move |_: &Theme| container::Style {
                     background: Some(Background::Color(bg_color)),
                     ..Default::default()
                 })
                 .width(Fill)
-                .height(Fill),
-            container(info).width(Fill).height(Fill),
-            selection_overlay,
-            viewport_mouse,
-        ]
-        .width(Fill)
-        .height(Fill);
+                .height(Fill)]
+            .width(Fill)
+            .height(Fill)
+        } else {
+            stack![
+                container(viewport_3d)
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(Background::Color(bg_color)),
+                        ..Default::default()
+                    })
+                    .width(Fill)
+                    .height(Fill),
+                container(info).width(Fill).height(Fill),
+                selection_overlay,
+                viewport_mouse,
+            ]
+            .width(Fill)
+            .height(Fill)
+        };
 
-        if self.show_navbar {
+        if self.show_navbar && !tab.is_start {
             let nav = container(overlay::nav_toolbar())
                 .align_right(Fill)
                 .align_top(Fill)
@@ -442,7 +463,7 @@ impl H7CAD {
             viewport_stack = viewport_stack.push(nav);
         }
 
-        if self.show_viewcube && !is_paper {
+        if self.show_viewcube && !is_paper && !tab.is_start {
             let cube_click: Element<'_, Message> = container(
                 mouse_area(container(
                     iced::widget::Space::new()
@@ -467,10 +488,16 @@ impl H7CAD {
         }
 
         if let Some(dyn_ol) = dyn_input_overlay {
-            viewport_stack = viewport_stack.push(dyn_ol);
+            if !tab.is_start {
+                viewport_stack = viewport_stack.push(dyn_ol);
+            }
         }
 
-        let properties_el: Element<'_, Message> = if self.show_properties {
+        // Properties / layers panels carry no useful state on the Start tab.
+        // Replace the properties panel with a Recent Documents list there.
+        let properties_el: Element<'_, Message> = if tab.is_start {
+            recent_files_panel(&self.app_menu.recent)
+        } else if self.show_properties {
             tab.properties.view()
         } else {
             Space::new().into()
@@ -877,47 +904,47 @@ pub(super) fn doc_tab_bar<'a>(tabs: &'a [DocumentTab], active_tab: usize) -> Ele
                 snap: false,
             });
 
-        let close_btn = button(text("×").size(11).color(Color {
-            r: 0.55,
-            g: 0.55,
-            b: 0.55,
-            a: 1.0,
-        }))
-        .on_press(Message::TabClose(idx))
-        .padding([3, 5])
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(Background::Color(match status {
-                button::Status::Hovered => CLOSE_HOVER,
-                _ => {
-                    if is_active {
-                        TAB_ACTIVE
-                    } else {
-                        TAB_INACTIVE
-                    }
-                }
-            })),
-            border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-
-        bar = bar.push(
-            container(row![title_btn, close_btn].spacing(0).align_y(iced::Center)).style(
-                move |_: &Theme| container::Style {
-                    border: Border {
-                        color: if is_active {
-                            BORDER_COLOR
+        // Start tab is fixed — no close button. Every other tab gets a close.
+        let row_inner: Row<'_, Message> = if tab.is_start {
+            row![title_btn].spacing(0).align_y(iced::Center)
+        } else {
+            let close_btn = button(text("×").size(11).color(Color {
+                r: 0.55,
+                g: 0.55,
+                b: 0.55,
+                a: 1.0,
+            }))
+            .on_press(Message::TabClose(idx))
+            .padding([3, 5])
+            .style(move |_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered => CLOSE_HOVER,
+                    _ => {
+                        if is_active {
+                            TAB_ACTIVE
                         } else {
-                            Color::TRANSPARENT
-                        },
-                        width: if is_active { 1.0 } else { 0.0 },
-                        radius: 0.0.into(),
-                    },
+                            TAB_INACTIVE
+                        }
+                    }
+                })),
+                border: Border {
+                    radius: 3.0.into(),
                     ..Default::default()
                 },
-            ),
+                ..Default::default()
+            });
+            row![title_btn, close_btn].spacing(0).align_y(iced::Center)
+        };
+
+        bar = bar.push(
+            container(row_inner).style(move |_: &Theme| container::Style {
+                border: Border {
+                    color: if is_active { BORDER_COLOR } else { Color::TRANSPARENT },
+                    width: if is_active { 1.0 } else { 0.0 },
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            }),
         );
     }
 
@@ -1556,4 +1583,309 @@ fn unsaved_changes_dialog_window(name: &str) -> Element<'static, Message> {
     .center(Fill)
     .padding([24, 28])
     .into()
+}
+
+// ── Start / Welcome page ──────────────────────────────────────────────────
+//
+// Renders in place of the model-space viewport when the active tab is the
+// fixed Start tab (`DocumentTab::is_start`). English-only by design — this
+// is the public welcome screen and stays consistent across locales.
+//
+// The page picks up the application icon's red-brown (#B03020) as a tint so
+// it visually belongs to H7CAD without overpowering the dark workspace.
+
+const BRAND: Color = Color { r: 0.690, g: 0.188, b: 0.125, a: 1.0 }; // #B03020
+const BRAND_DARK: Color = Color { r: 0.45, g: 0.12, b: 0.08, a: 1.0 };
+const BRAND_TINT_BG: Color = Color { r: 0.14, g: 0.085, b: 0.085, a: 1.0 }; // dark, faint red wash
+
+pub(super) fn start_page_view<'a>() -> Element<'a, Message> {
+    const TEXT: Color = Color { r: 0.94, g: 0.93, b: 0.92, a: 1.0 };
+    const MUTED: Color = Color { r: 0.62, g: 0.62, b: 0.62, a: 1.0 };
+    const CARD_BG: Color = Color { r: 0.12, g: 0.12, b: 0.13, a: 1.0 };
+    const CARD_BORDER: Color = Color { r: 0.20, g: 0.20, b: 0.22, a: 1.0 };
+
+    // Brand-tinted "Welcome to" — the "H7CAD" word takes the accent colour
+    // (Thunderbird-style coloured headline split).
+    let headline = row![
+        text("Welcome to ").size(40).color(TEXT),
+        text("H7CAD").size(40).color(BRAND),
+    ]
+    .align_y(iced::Center);
+
+    let subtitle = text(
+        "H7CAD is an open-source CAD viewer and editor — a gift from contributors like you. \
+         Open a DWG/DXF file, start a new drawing, or help shape what comes next.",
+    )
+    .size(13)
+    .color(MUTED);
+
+    // Plain outlined button (Open / New / Help / Contribute).
+    let outline_btn = |label: &'static str, msg: Message| {
+        button(text(label).size(14).color(TEXT))
+            .on_press(msg)
+            .padding([10, 22])
+            .style(move |_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered => Color { r: 0.18, g: 0.18, b: 0.20, a: 1.0 },
+                    _ => Color { r: 0.13, g: 0.13, b: 0.15, a: 1.0 },
+                })),
+                text_color: TEXT,
+                border: Border {
+                    color: Color { r: 0.30, g: 0.30, b: 0.33, a: 1.0 },
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            })
+    };
+
+    // Donate — the prominent call-to-action. Solid brand fill, white text.
+    let donate_btn = {
+        button(
+            row![
+                text("♥ ").size(15).color(Color::WHITE),
+                text("Donate").size(14).color(Color::WHITE),
+            ]
+            .align_y(iced::Center),
+        )
+        .on_press(Message::RibbonToolClick {
+            tool_id: "DONATE".to_string(),
+            event: crate::modules::ModuleEvent::Command("DONATE".to_string()),
+        })
+        .padding([12, 28])
+        .style(|_: &Theme, status| button::Style {
+            background: Some(Background::Color(match status {
+                button::Status::Hovered => BRAND_DARK,
+                _ => BRAND,
+            })),
+            text_color: Color::WHITE,
+            border: Border {
+                color: BRAND_DARK,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            },
+            ..Default::default()
+        })
+    };
+
+    let primary_row = row![
+        outline_btn("New Drawing", Message::TabNew),
+        outline_btn("Open File…", Message::OpenFile),
+        donate_btn,
+    ]
+    .spacing(12)
+    .align_y(iced::Center);
+
+    let secondary_row = row![
+        outline_btn(
+            "Contribute",
+            Message::RibbonToolClick {
+                tool_id: "REPORT".to_string(),
+                event: crate::modules::ModuleEvent::Command("REPORT".to_string()),
+            },
+        ),
+        outline_btn(
+            "Release Notes",
+            Message::RibbonToolClick {
+                tool_id: "CHANGELOG".to_string(),
+                event: crate::modules::ModuleEvent::Command("CHANGELOG".to_string()),
+            },
+        ),
+        outline_btn("About", Message::AboutOpen),
+    ]
+    .spacing(12)
+    .align_y(iced::Center);
+
+    let card_section = |heading: &'static str, sub: &'static str, body: &'static str| {
+        container(
+            column![
+                text(heading).size(20).color(TEXT),
+                text(sub).size(13).color(MUTED),
+                Space::new().height(iced::Length::Fixed(10.0)),
+                text(body).size(12).color(MUTED),
+            ]
+            .spacing(6),
+        )
+        .padding(20)
+        .width(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(CARD_BG)),
+            border: Border {
+                color: CARD_BORDER,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..Default::default()
+        })
+    };
+
+    let cards = row![
+        card_section(
+            "Free and open source",
+            "H7CAD belongs to its users.",
+            "Source is openly developed and distributed under a permissive licence. \
+             You are free to use, study, modify, and share H7CAD.",
+        ),
+        card_section(
+            "Community driven",
+            "Be part of the story.",
+            "Anyone can contribute — translations, bug reports, feature ideas, code, \
+             or simply spreading the word. Your involvement shapes the project.",
+        ),
+    ]
+    .spacing(16);
+
+    // Buttons sit on a transparent container with a large, brand-tinted
+    // ambient shadow (offset = 0, big blur) — produces a soft halo behind
+    // the action row, matching the Thunderbird coloured-glow look against
+    // the dark page.
+    let primary_glow = container(primary_row)
+        .padding(iced::Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 8.0 })
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            shadow: iced::Shadow {
+                color: Color { r: BRAND.r, g: BRAND.g, b: BRAND.b, a: 0.45 },
+                offset: iced::Vector::ZERO,
+                blur_radius: 80.0,
+            },
+            ..Default::default()
+        });
+
+    let content = column![
+        Space::new().height(iced::Length::Fixed(28.0)),
+        container(headline).center_x(Fill),
+        container(subtitle).center_x(Fill).padding([10, 60]),
+        Space::new().height(iced::Length::Fixed(22.0)),
+        container(primary_glow).center_x(Fill),
+        Space::new().height(iced::Length::Fixed(10.0)),
+        container(secondary_row).center_x(Fill),
+        Space::new().height(iced::Length::Fixed(40.0)),
+        cards,
+        Space::new().height(Fill),
+    ]
+    .spacing(0)
+    .width(Fill)
+    .height(Fill);
+
+    // Page background reverts to plain dark — the glow alone provides the
+    // brand colour cue, the rest of the page stays neutral so it reads as
+    // "workspace area" not "advertising banner".
+    const PAGE_BG: Color = Color { r: 0.08, g: 0.08, b: 0.085, a: 1.0 };
+    container(content)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(PAGE_BG)),
+            ..Default::default()
+        })
+        .padding(iced::Padding { top: 40.0, right: 60.0, bottom: 40.0, left: 60.0 })
+        .width(Fill)
+        .height(Fill)
+        .into()
+}
+
+// ── Recent Documents panel (Start tab left rail) ──────────────────────────
+//
+// Slots into the same `row![properties_el, viewport_stack]` position the
+// Properties panel normally occupies, but only when the active tab is the
+// Start tab. The list is restored from disk at boot and re-saved on every
+// open — entries persist across sessions.
+pub(super) fn recent_files_panel<'a>(recents: &'a [std::path::PathBuf]) -> Element<'a, Message> {
+    const PANEL_BG: Color = Color { r: 0.10, g: 0.10, b: 0.11, a: 1.0 };
+    const PANEL_BORDER: Color = Color { r: 0.18, g: 0.18, b: 0.20, a: 1.0 };
+    const ITEM_HOVER: Color = Color { r: 0.16, g: 0.16, b: 0.18, a: 1.0 };
+    const TEXT: Color = Color { r: 0.92, g: 0.91, b: 0.90, a: 1.0 };
+    const MUTED: Color = Color { r: 0.60, g: 0.60, b: 0.62, a: 1.0 };
+
+    let header = container(text("Recent Documents").size(11).color(MUTED))
+        .padding(iced::Padding { top: 12.0, right: 14.0, bottom: 8.0, left: 14.0 });
+
+    let body: Element<'a, Message> = if recents.is_empty() {
+        container(
+            text("Files you open will show up here.")
+                .size(11)
+                .color(MUTED),
+        )
+        .padding([10, 14])
+        .into()
+    } else {
+        let mut col = column![].spacing(0);
+        for path in recents {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            let dir = path
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let path_for_open = path.clone();
+            let open_btn = button(
+                column![
+                    text(name).size(12).color(TEXT),
+                    text(dir).size(10).color(MUTED),
+                ]
+                .spacing(2),
+            )
+            .on_press(Message::OpenRecent(path_for_open))
+            .padding([6, 12])
+            .width(Fill)
+            .style(move |_: &Theme, status| button::Style {
+                background: Some(Background::Color(match status {
+                    button::Status::Hovered => ITEM_HOVER,
+                    _ => Color::TRANSPARENT,
+                })),
+                text_color: TEXT,
+                border: Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+
+            let path_for_remove = path.clone();
+            let remove_btn = button(text("×").size(12).color(MUTED))
+                .on_press(Message::RecentRemove(path_for_remove))
+                .padding([4, 8])
+                .style(|_: &Theme, status| button::Style {
+                    background: Some(Background::Color(match status {
+                        button::Status::Hovered => Color { r: 0.45, g: 0.15, b: 0.15, a: 1.0 },
+                        _ => Color::TRANSPARENT,
+                    })),
+                    text_color: MUTED,
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                });
+
+            col = col.push(
+                row![open_btn, remove_btn]
+                    .spacing(0)
+                    .align_y(iced::Center),
+            );
+        }
+        iced::widget::scrollable(col).into()
+    };
+
+    container(column![header, body])
+        .width(iced::Length::Fixed(280.0))
+        .height(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(Background::Color(PANEL_BG)),
+            border: Border {
+                color: PANEL_BORDER,
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        })
+        .into()
 }
