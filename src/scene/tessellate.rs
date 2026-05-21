@@ -462,60 +462,18 @@ pub fn tessellate_dimension(
     line_weight_px: f32,
     world_offset: [f64; 3],
     anno_scale: f32,
+    // LOD hints — when present, synthesised dim text routes through the
+    // top-level LOD ladder (baseline / greek / full) instead of the truck
+    // path so far-out drawings collapse to a colored rect or baseline.
+    selected_set: &std::collections::HashSet<acadrust::Handle>,
+    active_viewport: Option<acadrust::Handle>,
+    bg_color: [f32; 4],
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
 ) -> Vec<WireModel> {
     let name = handle.value().to_string();
-
-    // ── Anonymous-block fast path ───────────────────────────────────────────
-    //
-    // AutoCAD bakes each dimension's final geometry (extension lines, dim
-    // line, arrows, text MText) into a per-instance block — usually named
-    // `*D<n>`, but some authoring tools use a custom name like
-    // `DIMBLOCK###-4NP`. When that block exists we render its contents
-    // directly: the text height inside the block is the FINAL displayed
-    // height (DIMTXT × DIMSCALE already applied at creation), so
-    // synthesising it from the dim style would double-apply DIMSCALE.
-    let dim_block_name = &dim.base().block_name;
-    if !dim_block_name.trim().is_empty() {
-        if let Some(br) = document
-            .block_records
-            .iter()
-            .find(|br| br.name.eq_ignore_ascii_case(dim_block_name))
-        {
-            if !br.entity_handles.is_empty() {
-                let mut wires: Vec<WireModel> =
-                    Vec::with_capacity(br.entity_handles.len());
-                for &eh in &br.entity_handles {
-                    let Some(sub) = document.get_entity(eh) else { continue };
-                    // Inherit dim's color + line weight when the sub-entity is
-                    // ByBlock; ByLayer stays on its own layer.
-                    let sub_color = if selected {
-                        WireModel::SELECTED
-                    } else {
-                        entity_color
-                    };
-                    let mut wire = tessellate(
-                        document,
-                        handle,
-                        sub,
-                        selected,
-                        sub_color,
-                        0.0,
-                        [0.0; 8],
-                        line_weight_px,
-                        world_offset,
-                        // Sub-entities are already baked at the final WCS
-                        // size; don't re-apply anno_scale.
-                        1.0,
-                    );
-                    wire.name = name.clone();
-                    wires.push(wire);
-                }
-                if !wires.is_empty() {
-                    return wires;
-                }
-            }
-        }
-    }
+    // (Baked-block fast path moved up into scene::tessellate_entity so the
+    // recursive call goes through the LOD ladder, not the truck path.)
 
     let style_name = &dim.base().style_name;
     let style = document.dim_styles.iter().find(|s| {
@@ -843,38 +801,46 @@ pub fn tessellate_dimension(
         // Tolerance Text rendered separately so DIMTFAC scales its height
         // and DIMTOLJ aligns it vertically against the primary text.
         let tol_entity = dimension_tolerance_entity(dim, style, &text, dim_txt);
-        let mut wire = tessellate(
+        // Route synthesised dim text through tessellate_entity so the
+        // baseline/greek/full LOD ladder applies (zoom-out behaviour
+        // matches top-level Text). The text already has dim_scale baked
+        // into its height, so anno_scale stays 1.0.
+        let synth_text_entity = EntityType::Text(text);
+        let text_wires = crate::scene::tessellate_entity_dim_text(
             document,
-            handle,
-            &EntityType::Text(text),
-            selected,
-            text_color,
-            0.0,
-            [0.0; 8],
-            line_weight_px,
+            selected_set,
+            active_viewport,
             world_offset,
-            // dim text already baked dim_scale into its height — don't
-            // let the inner tessellate re-apply anno_scale.
+            bg_color,
             1.0,
+            &synth_text_entity,
+            view_aabb,
+            world_per_pixel,
+            text_color,
         );
-        wire.name = name.clone();
-        wires.push(wire);
+        for mut w in text_wires {
+            w.name = name.clone();
+            wires.push(w);
+        }
 
         if let Some(tol_text) = tol_entity {
-            let mut tol_wire = tessellate(
+            let tol_entity_e = EntityType::Text(tol_text);
+            let tol_wires = crate::scene::tessellate_entity_dim_text(
                 document,
-                handle,
-                &EntityType::Text(tol_text),
-                selected,
-                text_color,
-                0.0,
-                [0.0; 8],
-                line_weight_px,
+                selected_set,
+                active_viewport,
                 world_offset,
+                bg_color,
                 1.0,
+                &tol_entity_e,
+                view_aabb,
+                world_per_pixel,
+                text_color,
             );
-            tol_wire.name = name;
-            wires.push(tol_wire);
+            for mut w in tol_wires {
+                w.name = name.clone();
+                wires.push(w);
+            }
         }
     }
 

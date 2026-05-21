@@ -4658,6 +4658,38 @@ fn clip_polyline_to_rect(
 // requiring `Scene` (which contains `Rc<RefCell<...>>` and is `!Send`) to
 // cross thread boundaries.
 
+/// Tessellate a synthesised dimension-text entity through `tessellate_entity`
+/// so it picks up the standard text LOD ladder (baseline / greek / full),
+/// then re-color the returned wires with the dimension's resolved text colour
+/// (so DIMCLRT / DIMSTYLE colours win over the synthetic Text's defaults).
+pub(super) fn tessellate_entity_dim_text(
+    document: &acadrust::CadDocument,
+    selected: &HashSet<Handle>,
+    active_viewport: Option<Handle>,
+    world_offset: [f64; 3],
+    bg_color: [f32; 4],
+    anno_scale: f32,
+    e: &EntityType,
+    view_aabb: Option<[f32; 4]>,
+    world_per_pixel: Option<f32>,
+    text_color: [f32; 4],
+) -> Vec<WireModel> {
+    let mut wires = tessellate_entity(
+        document, selected, active_viewport, world_offset, bg_color,
+        anno_scale, e, None, view_aabb, world_per_pixel,
+    );
+    for w in &mut wires {
+        // Synth dim text carries no real entity colour — paint everything
+        // (including greek-LOD fill tris which read `wire.color`) with the
+        // dim's text colour. Selection highlight already baked in by
+        // tessellate_entity, so leave that alone.
+        if !w.selected {
+            w.color = text_color;
+        }
+    }
+    wires
+}
+
 fn tessellate_entity(
     document: &acadrust::CadDocument,
     selected: &HashSet<Handle>,
@@ -4775,6 +4807,64 @@ fn tessellate_entity(
     let pattern_length = pattern_length * pslt_factor;
     let pattern = pattern.map(|v| v * pslt_factor);
 
+    // ── Dimension baked-block fast path ─────────────────────────────────────
+    //
+    // AutoCAD bakes each dimension's final geometry (extension lines, dim
+    // line, arrows, text MText) into a per-instance block — usually
+    // `*D<n>`, but custom names like `DIMBLOCK###-4NP` also occur. When the
+    // block exists we render its contents through `tessellate_entity` so
+    // sub-Text/MText get the standard baseline/greek/full LOD ladder, and
+    // DIMTXT × DIMSCALE isn't re-applied on already-baked geometry.
+    if let EntityType::Dimension(dim) = e {
+        let block_name = &dim.base().block_name;
+        if !block_name.trim().is_empty() {
+            if let Some(br) = document
+                .block_records
+                .iter()
+                .find(|br| br.name.eq_ignore_ascii_case(block_name))
+            {
+                if !br.entity_handles.is_empty() {
+                    let mut wires: Vec<WireModel> =
+                        Vec::with_capacity(br.entity_handles.len());
+                    for &eh in &br.entity_handles {
+                        let Some(sub) = document.get_entity(eh) else { continue };
+                        // Sub-entities inside *D### / DIMBLOCK## blocks
+                        // typically use ByBlock color/linetype/lineweight —
+                        // they should inherit from the Dimension entity.
+                        let sub_color_is_byblock =
+                            sub.common().color == acadrust::types::Color::ByBlock;
+                        let sub_wires = tessellate_entity(
+                            document, selected, active_viewport, world_offset, bg_color,
+                            // Block contents are baked at the final WCS size —
+                            // don't let downstream paths re-apply anno_scale.
+                            1.0, sub, block_cache, view_aabb, world_per_pixel,
+                        );
+                        for mut w in sub_wires {
+                            w.name = h.value().to_string();
+                            // Override ByBlock colour with the dim's resolved
+                            // colour so text matches `DIMCLRT`-style behaviour
+                            // (or layer colour) instead of the raw ByBlock
+                            // fallback that render_style_for produces.
+                            if sub_color_is_byblock {
+                                w.color = if sel { WireModel::SELECTED } else { entity_color };
+                                w.aci = aci;
+                            }
+                            wires.push(w);
+                        }
+                    }
+                    if !wires.is_empty() {
+                        let aabb = entity_aabb(e, world_offset);
+                        for w in &mut wires {
+                            w.aabb = aabb;
+                        }
+                        return wires;
+                    }
+                }
+            }
+        }
+        // Fall through to the synthesis path below when no block is attached.
+    }
+
     if let EntityType::Dimension(dim) = e {
         let aabb = entity_aabb(e, world_offset);
         let mut wires = tessellate::tessellate_dimension(
@@ -4786,6 +4876,11 @@ fn tessellate_entity(
             line_weight_px,
             world_offset,
             anno_scale,
+            selected,
+            active_viewport,
+            bg_color,
+            view_aabb,
+            world_per_pixel,
         );
         for w in &mut wires {
             w.aci = aci;
@@ -4835,12 +4930,18 @@ fn tessellate_entity(
                         Vec::with_capacity(br.entity_handles.len());
                     for &eh in &br.entity_handles {
                         let Some(sub) = document.get_entity(eh) else { continue };
+                        let sub_color_is_byblock =
+                            sub.common().color == acadrust::types::Color::ByBlock;
                         let sub_wires = tessellate_entity(
                             document, selected, active_viewport, world_offset, bg_color,
                             anno_scale, sub, block_cache, view_aabb, world_per_pixel,
                         );
                         for mut w in sub_wires {
                             w.name = h.value().to_string();
+                            if sub_color_is_byblock {
+                                w.color = if sel { WireModel::SELECTED } else { entity_color };
+                                w.aci = aci;
+                            }
                             wires.push(w);
                         }
                     }
@@ -5010,10 +5111,24 @@ fn tessellate_entity(
     //   < 1 px  → baseline line in the text's color (text-here hint)
     //   1–5 px  → greeked OBB rect in the text's color
     //   ≥ 5 px  → full per-glyph stroke tessellation
+    //
+    // Applies to every entity that is "primarily a piece of text" — Text,
+    // MText, ATTDEF, ATTRIB, Tolerance — so far-out drawings don't pay the
+    // full glyph-tessellation cost. Composite entities (Dimension, Table,
+    // MultiLeader) carry non-text geometry and have their own LOD paths.
     if let Some(wpp) = world_per_pixel {
         let text_height: Option<f64> = match e {
             EntityType::Text(t) => Some(t.height * anno_scale as f64),
             EntityType::MText(m) => Some(m.height * anno_scale as f64),
+            EntityType::AttributeDefinition(a) => Some(a.height * anno_scale as f64),
+            EntityType::AttributeEntity(a) => Some(a.height * anno_scale as f64),
+            EntityType::Tolerance(t) => {
+                // Tolerance text_height defaults to 0.18 from creation; treat
+                // 0 as missing and fall back to the AutoCAD default so the
+                // pixel check still kicks in for legitimately tiny dimensions.
+                let raw = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+                Some(raw * anno_scale as f64)
+            }
             _ => None,
         };
         if let Some(h_world) = text_height {
@@ -5155,11 +5270,32 @@ pub(crate) fn text_obb_corners_native(
     anno_scale: f32,
     mtext_lines_override: Option<usize>,
 ) -> Option<[[f64; 3]; 4]> {
-    use acadrust::entities::{
-        AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment,
+    use acadrust::entities::attribute_definition::{
+        HorizontalAlignment as AttrHA, VerticalAlignment as AttrVA,
     };
+    use acadrust::entities::{AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment};
 
     let anno = anno_scale as f64;
+
+    // Map Attribute alignment enums to the same h/v anchor fractions used by
+    // Text. Kept local because the Attribute enum is distinct from Text's.
+    let attr_h_anchor = |ha: AttrHA| -> f64 {
+        match ha {
+            AttrHA::Left => 0.0,
+            AttrHA::Center | AttrHA::Middle | AttrHA::Aligned | AttrHA::Fit => 0.5,
+            AttrHA::Right => 1.0,
+        }
+    };
+    let attr_v_anchor = |va: AttrVA| -> f64 {
+        match va {
+            AttrVA::Baseline | AttrVA::Bottom => 0.0,
+            AttrVA::Middle => 0.5,
+            AttrVA::Top => 1.0,
+        }
+    };
+    let attr_use_align_pt = |ha: AttrHA, va: AttrVA| -> bool {
+        !matches!((ha, va), (AttrHA::Left, AttrVA::Baseline))
+    };
 
     let (ix, iy, iz, w, h, rot, h_anchor, v_anchor) = match e {
         EntityType::Text(t) => {
@@ -5204,6 +5340,62 @@ pub(crate) fn text_obb_corners_native(
                 t.rotation,
                 h_anchor,
                 v_anchor,
+            )
+        }
+        EntityType::AttributeDefinition(a) => {
+            let h_world = a.height * anno;
+            let w_factor = if a.width_factor > 0.0 { a.width_factor } else { 1.0 };
+            // Render the tag in preview when no default; matches `attribute.rs`.
+            let display = if a.default_value.is_empty() { &a.tag } else { &a.default_value };
+            let n = display.chars().count().max(1) as f64;
+            let w_world = n * h_world * w_factor * 0.6;
+            let h_anchor = attr_h_anchor(a.horizontal_alignment);
+            let v_anchor = attr_v_anchor(a.vertical_alignment);
+            let anchor = if attr_use_align_pt(a.horizontal_alignment, a.vertical_alignment) {
+                a.alignment_point
+            } else {
+                a.insertion_point
+            };
+            (
+                anchor.x, anchor.y, anchor.z, w_world, h_world, a.rotation, h_anchor, v_anchor,
+            )
+        }
+        EntityType::AttributeEntity(a) => {
+            let h_world = a.height * anno;
+            let w_factor = if a.width_factor > 0.0 { a.width_factor } else { 1.0 };
+            let n = a.value.chars().count().max(1) as f64;
+            let w_world = n * h_world * w_factor * 0.6;
+            let h_anchor = attr_h_anchor(a.horizontal_alignment);
+            let v_anchor = attr_v_anchor(a.vertical_alignment);
+            let anchor = if attr_use_align_pt(a.horizontal_alignment, a.vertical_alignment) {
+                a.alignment_point
+            } else {
+                a.insertion_point
+            };
+            (
+                anchor.x, anchor.y, anchor.z, w_world, h_world, a.rotation, h_anchor, v_anchor,
+            )
+        }
+        EntityType::Tolerance(t) => {
+            // Approximate: a feature control frame is roughly 1 line tall;
+            // width comes from char-count of the (already-stripped) text.
+            // GD&T symbols all advance one cell, so plain char count is close.
+            let raw_h = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            let h_world = raw_h * anno;
+            // Each cell ≈ 1.4 × height (matches `tolerance.rs` min_cell_w).
+            let n = t.text.chars().filter(|c| *c != '\n').count().max(1) as f64;
+            let w_world = h_world * 1.4 * n * 0.5; // rough — fine for LOD greek
+            // direction encodes rotation as a vector.
+            let rot = (t.direction.y).atan2(t.direction.x);
+            (
+                t.insertion_point.x,
+                t.insertion_point.y,
+                t.insertion_point.z,
+                w_world,
+                h_world * 1.5, // frame is taller than glyph cap by ~0.5 h
+                rot,
+                0.0, // anchored at insertion point (bottom-left)
+                0.0,
             )
         }
         EntityType::MText(m) => {
@@ -5411,6 +5603,12 @@ fn text_baseline_points(
     let line_h = match e {
         EntityType::Text(t) => (t.height * anno_scale as f64) as f32,
         EntityType::MText(m) => (m.height * anno_scale as f64) as f32,
+        EntityType::AttributeDefinition(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::AttributeEntity(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::Tolerance(t) => {
+            let raw = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            (raw * anno_scale as f64) as f32
+        }
         _ => return vec![],
     };
     if line_h <= 0.0 {
@@ -5466,6 +5664,12 @@ fn text_greek_obb_tris(
     let line_h = match e {
         EntityType::Text(t) => (t.height * anno_scale as f64) as f32,
         EntityType::MText(m) => (m.height * anno_scale as f64) as f32,
+        EntityType::AttributeDefinition(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::AttributeEntity(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::Tolerance(t) => {
+            let raw = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            (raw * anno_scale as f64) as f32
+        }
         _ => return vec![],
     };
     if line_h <= 0.0 {
