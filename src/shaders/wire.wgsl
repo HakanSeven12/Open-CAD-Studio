@@ -1,12 +1,15 @@
 // Wire shader — renders 1-D CAD entities as screen-aligned quads.
-// Topology: TriangleList (6 vertices per segment).
+// Topology: TriangleList, 6 vertices drawn per INSTANCE.
 //
-// Each vertex carries both segment endpoints (pos_a, pos_b) plus which_end
-// (0=A, 1=B) and side (±1).  The vertex shader expands the quad by half_width
-// pixels perpendicular to the segment direction in screen space.
+// One instance = one segment. The six vertex IDs map to the corners of a
+// two-triangle quad; the vertex shader derives `which_end` (0=A end, 1=B end)
+// and `side` (±1 perpendicular) from `@builtin(vertex_index)` and expands the
+// quad by `half_width` pixels perpendicular to the segment direction in
+// screen space.
 //
 // Linetype is applied entirely on the GPU:
-//   • distance = cumulative arc-length from wire start (interpolated by GPU).
+//   • distance = cumulative arc-length, linearly interpolated from
+//     (distance_a, distance_b) by `which_end`.
 //   • pattern_length > 0 enables the dash test; 0 = solid (no discard).
 //   • pat0/pat1 encode up to 8 elements: positive=dash, negative=gap.
 
@@ -15,24 +18,23 @@ struct Uniforms {
     camera_pos:       vec4<f32>,
     viewport_size:    vec2<f32>,
     world_per_pixel:  f32,
-    // LWDISPLAY toggle: 0.0 = force 1 px (half_width 0.5), 1.0 = use per-vertex
-    // baked half_width. Lets the LWT button switch without retessellating.
+    // LWDISPLAY toggle: 0.0 = force 1 px (half_width 0.5), 1.0 = use the
+    // per-instance baked half_width. Lets the LWT button switch without
+    // retessellating.
     lwdisplay_enable: f32,
 }
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
-struct VertexIn {
+struct InstanceIn {
     @location(0) pos_a:          vec3<f32>,
     @location(1) pos_b:          vec3<f32>,
-    @location(2) which_end:      f32,
-    @location(3) side:           f32,
-    @location(4) color:          vec4<f32>,
-    @location(5) distance:       f32,
-    @location(6) half_width:     f32,
-    @location(7) pattern_length: f32,
-    // location 8 = _pad (not needed in shader)
-    @location(8) pat0:           vec4<f32>,
-    @location(9) pat1:           vec4<f32>,
+    @location(2) color:          vec4<f32>,
+    @location(3) distance_a:     f32,
+    @location(4) distance_b:     f32,
+    @location(5) half_width:     f32,
+    @location(6) pattern_length: f32,
+    @location(7) pat0:           vec4<f32>,
+    @location(8) pat1:           vec4<f32>,
 }
 
 struct VertexOut {
@@ -44,7 +46,15 @@ struct VertexOut {
     @location(4)       pat1:           vec4<f32>,
 }
 
-@vertex fn vs_main(in: VertexIn) -> VertexOut {
+@vertex fn vs_main(@builtin(vertex_index) vid: u32, in: InstanceIn) -> VertexOut {
+    // Two-triangle quad corner table:
+    //   vid 0,1,2 = (A,-1) (B,-1) (B,+1)
+    //   vid 3,4,5 = (A,-1) (B,+1) (A,+1)
+    let which_end_arr = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
+    let side_arr      = array<f32, 6>(-1.0, -1.0, 1.0, -1.0, 1.0, 1.0);
+    let which_end = which_end_arr[vid];
+    let side      = side_arr[vid];
+
     let clip_a = u.view_proj * vec4<f32>(in.pos_a, 1.0);
     let clip_b = u.view_proj * vec4<f32>(in.pos_b, 1.0);
 
@@ -71,19 +81,19 @@ struct VertexOut {
     let perp_ndc = perp / (u.viewport_size * 0.5);
 
     // Select the clip-space position for this vertex's endpoint.
-    let clip_pos = mix(clip_a, clip_b, in.which_end);
+    let clip_pos = mix(clip_a, clip_b, which_end);
 
     // LWDISPLAY off → collapse to a 1-pixel-wide line (half_width = 0.5).
     let hw = select(0.5, in.half_width, u.lwdisplay_enable > 0.5);
 
     // Offset in clip space (multiply by w to un-apply perspective division).
-    let ndc_offset = perp_ndc * hw * in.side;
+    let ndc_offset = perp_ndc * hw * side;
     let final_clip = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
 
     var out: VertexOut;
     out.clip_pos       = final_clip;
     out.color          = in.color;
-    out.distance       = in.distance;
+    out.distance       = mix(in.distance_a, in.distance_b, which_end);
     out.pattern_length = in.pattern_length;
     out.pat0           = in.pat0;
     out.pat1           = in.pat1;

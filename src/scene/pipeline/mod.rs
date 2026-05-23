@@ -158,7 +158,7 @@ impl Pipeline {
             vertex: wgpu::VertexState {
                 module: &wire_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wire_gpu::WireVertex::layout()],
+                buffers: &[wire_gpu::WireInstance::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState {
@@ -201,7 +201,7 @@ impl Pipeline {
             vertex: wgpu::VertexState {
                 module: &wire_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wire_gpu::WireVertex::layout()],
+                buffers: &[wire_gpu::WireInstance::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState {
@@ -1073,9 +1073,9 @@ impl Pipeline {
             pass.set_pipeline(&self.wire_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for edges in &self.gpu_face3d_edges {
-                if edges.vertex_count >= 6 {
-                    pass.set_vertex_buffer(0, edges.vertex_buffer.slice(..));
-                    pass.draw(0..edges.vertex_count, 0..1);
+                if edges.instance_count > 0 {
+                    pass.set_vertex_buffer(0, edges.instance_buffer.slice(..));
+                    pass.draw(0..6, 0..edges.instance_count);
                 }
             }
         }
@@ -1109,7 +1109,7 @@ impl Pipeline {
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             let mut scissor_active = false;
             for (i, wire) in self.gpu_wires.iter().enumerate() {
-                if wire.vertex_count < 6 {
+                if wire.instance_count == 0 {
                     continue;
                 }
                 match self.wire_pixel_scissors.get(i) {
@@ -1123,8 +1123,8 @@ impl Pipeline {
                     }
                     _ => {}
                 }
-                pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                pass.draw(0..wire.vertex_count, 0..1);
+                pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
+                pass.draw(0..6, 0..wire.instance_count);
             }
             if scissor_active {
                 pass.set_scissor_rect(0, 0, vp.width, vp.height);
@@ -1213,9 +1213,9 @@ impl Pipeline {
             pass.set_pipeline(&self.wire_xray_pipeline);
             pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             for wire in &self.gpu_selected_wires {
-                if wire.vertex_count >= 6 {
-                    pass.set_vertex_buffer(0, wire.vertex_buffer.slice(..));
-                    pass.draw(0..wire.vertex_count, 0..1);
+                if wire.instance_count > 0 {
+                    pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
+                    pass.draw(0..6, 0..wire.instance_count);
                 }
             }
         }
