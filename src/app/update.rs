@@ -2509,6 +2509,16 @@ impl H7CAD {
                 }
                 Task::none()
             }
+            Message::ToggleLineweightDisplay => {
+                let i = self.active_tab;
+                if i < self.tabs.len() {
+                    let h = &mut self.tabs[i].scene.document.header;
+                    h.lineweight_display = !h.lineweight_display;
+                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].dirty = true;
+                }
+                Task::none()
+            }
             Message::TogglePolar => {
                 self.polar_mode ^= true;
                 if self.polar_mode {

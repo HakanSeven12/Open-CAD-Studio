@@ -401,6 +401,8 @@ pub enum Message {
     ToggleGrid,
     /// Toggle orthogonal drawing constraint — F8 / ORTHO status-bar button.
     ToggleOrtho,
+    /// Toggle LWDISPLAY header flag — LWT status-bar button.
+    ToggleLineweightDisplay,
     /// Toggle polar-angle constraint — F10 / POLAR status-bar button.
     TogglePolar,
     /// Set polar tracking angle increment (right-click POLAR button).

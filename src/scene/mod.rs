@@ -2631,6 +2631,9 @@ impl Scene {
         }
 
         // Wide LWPolyline and Polyline2D fills
+        let [ox, oy, _] = hatch_offset;
+        let ox = ox as f32;
+        let oy = oy as f32;
         for entity in self.document.entities() {
             let (common, fills) = match entity {
                 EntityType::LwPolyline(pl) => (&pl.common, wide_lwpolyline_fills(pl)),
@@ -2653,7 +2656,14 @@ impl Scene {
             } else {
                 base_color
             };
-            for boundary in fills {
+            for mut boundary in fills {
+                // Wires subtract world_offset during tessellation; fills must
+                // match or the band drifts away from the centerline on
+                // drawings far from origin.
+                for p in boundary.iter_mut() {
+                    p[0] -= ox;
+                    p[1] -= oy;
+                }
                 models.push(HatchModel {
                     boundary: Arc::new(boundary),
                     pattern: hatch_model::HatchPattern::Solid,
@@ -5899,23 +5909,29 @@ fn polyline_segment_fill(
             [p0[0] - hw0 * nx, p0[1] - hw0 * ny],
         ])
     } else {
-        // Arc segment — arc band polygon
-        let angle = 4.0 * (bulge as f64).atan();
+        // Arc segment — arc band polygon.
+        // Center math matches `bulge_to_arc` in modules/home/modify/explode.rs:
+        //   r = chord * (1 + b²) / (4·|b|)
+        //   d = r * (1 - b²) / (1 + b²)   (signed: negative ⇒ major arc, center
+        //                                  flips to the opposite side of chord)
+        //   center = midpoint + sign(b) · d · left_perp(chord)
+        let b = bulge as f64;
+        let b2 = b * b;
         let dx = (p1[0] - p0[0]) as f64;
         let dy = (p1[1] - p0[1]) as f64;
-        let d = (dx * dx + dy * dy).sqrt();
-        if d < 1e-9 {
+        let chord_len = (dx * dx + dy * dy).sqrt();
+        if chord_len < 1e-9 || b.abs() < 1e-12 {
             return None;
         }
-        let r = (d / 2.0) / (angle / 2.0).sin().abs();
+        let r = chord_len * (1.0 + b2) / (4.0 * b.abs());
+        let d_perp = r * (1.0 - b2) / (1.0 + b2);
         let mx = ((p0[0] + p1[0]) * 0.5) as f64;
         let my = ((p0[1] + p1[1]) * 0.5) as f64;
-        let px = -dy / d;
-        let py = dx / d;
-        let sign = if bulge > 0.0 { 1.0_f64 } else { -1.0_f64 };
-        let h = r - (r * r - d * d / 4.0).max(0.0).sqrt();
-        let cx = (mx - sign * px * (r - h)) as f32;
-        let cy = (my - sign * py * (r - h)) as f32;
+        let perp_x = -dy / chord_len;
+        let perp_y = dx / chord_len;
+        let sign = b.signum();
+        let cx = (mx + sign * d_perp * perp_x) as f32;
+        let cy = (my + sign * d_perp * perp_y) as f32;
         let a0 = ((p0[1] - cy) as f32).atan2((p0[0] - cx) as f32);
         let a1 = ((p1[1] - cy) as f32).atan2((p1[0] - cx) as f32);
         let (sa, mut ea) = if bulge > 0.0 { (a0, a1) } else { (a1, a0) };
@@ -5923,23 +5939,26 @@ fn polyline_segment_fill(
             ea += std::f32::consts::TAU;
         }
         let span = ea - sa;
-        let segs = ((span.abs() / std::f32::consts::TAU) * 12.0)
+        let segs = ((span.abs() / std::f32::consts::TAU) * 24.0)
             .ceil()
             .max(4.0) as u32;
         let r = r as f32;
-        let hw = (hw0 + hw1) * 0.5;
-        let r_outer = r + hw;
-        let r_inner = (r - hw).max(0.0);
+        let r_outer = |t: f32| r + (hw0 + (hw1 - hw0) * t);
+        let r_inner = |t: f32| (r - (hw0 + (hw1 - hw0) * t)).max(0.0);
         let mut boundary = Vec::with_capacity((segs as usize + 1) * 2);
+        let inv = 1.0 / segs as f32;
         for j in 0..=segs {
-            let t = sa + span * (j as f32 / segs as f32);
-            boundary.push([cx + r_outer * t.cos(), cy + r_outer * t.sin()]);
+            let t = j as f32 * inv;
+            let ang = sa + span * t;
+            let ro = r_outer(t);
+            boundary.push([cx + ro * ang.cos(), cy + ro * ang.sin()]);
         }
         for j in (0..=segs).rev() {
-            let t = sa + span * (j as f32 / segs as f32);
-            boundary.push([cx + r_inner * t.cos(), cy + r_inner * t.sin()]);
+            let t = j as f32 * inv;
+            let ang = sa + span * t;
+            let ri = r_inner(t);
+            boundary.push([cx + ri * ang.cos(), cy + ri * ang.sin()]);
         }
-        boundary.truncate(64);
         Some(boundary)
     }
 }

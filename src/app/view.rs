@@ -544,6 +544,7 @@ impl H7CAD {
                         tab.scene.annotation_scale,
                         self.scale_popup_open,
                         scale_pill_enabled,
+                        tab.scene.document.header.lineweight_display,
                     )
                 })
                 .width(Fill)

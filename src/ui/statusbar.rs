@@ -48,6 +48,8 @@ impl StatusBar {
         scale_popup_open: bool,
         // True when the scale pill is interactive (always model space; paper space only when a viewport is active/selected).
         scale_pill_enabled: bool,
+        // LWDISPLAY header flag — controls lineweight visibility in the viewport.
+        lineweight_display: bool,
     ) -> Element<'a, Message> {
         let menu_btn = button(text("≡").size(14).color(ICON_COLOR))
             .on_press(Message::Command("MENU".into()))
@@ -102,6 +104,10 @@ impl StatusBar {
             tip(
                 toggle_pill("ORTHO", ortho_mode, Message::ToggleOrtho),
                 "Orthogonal Mode\nF8"
+            ),
+            tip(
+                toggle_pill("LWT", lineweight_display, Message::ToggleLineweightDisplay),
+                "Show Lineweight\nLWDISPLAY"
             ),
             polar_pill(polar_mode, polar_increment_deg),
             tip(

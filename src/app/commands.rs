@@ -4506,6 +4506,38 @@ impl H7CAD {
                     self.command_line.push_error("Usage: LTSCALE [value]");
                 }
             }
+            cmd if cmd == "LWDISPLAY" || cmd.starts_with("LWDISPLAY ") => {
+                let val_str = cmd.trim_start_matches("LWDISPLAY").trim();
+                let parsed: Result<Option<bool>, ()> =
+                    match val_str.to_ascii_uppercase().as_str() {
+                        "" => Ok(None),
+                        "ON" | "1" | "TRUE" => Ok(Some(true)),
+                        "OFF" | "0" | "FALSE" => Ok(Some(false)),
+                        _ => Err(()),
+                    };
+                match parsed {
+                    Err(_) => self
+                        .command_line
+                        .push_error("Usage: LWDISPLAY [ON|OFF]"),
+                    Ok(Some(v)) => {
+                        self.push_undo_snapshot(i, "LWDISPLAY");
+                        self.tabs[i].scene.document.header.lineweight_display = v;
+                        self.tabs[i].scene.bump_geometry();
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&format!(
+                            "LWDISPLAY {}",
+                            if v { "ON" } else { "OFF" }
+                        ));
+                    }
+                    Ok(None) => {
+                        let v = self.tabs[i].scene.document.header.lineweight_display;
+                        self.command_line.push_output(&format!(
+                            "LWDISPLAY = {}",
+                            if v { "ON" } else { "OFF" }
+                        ));
+                    }
+                }
+            }
             cmd if cmd == "CELTSCALE" || cmd.starts_with("CELTSCALE ") => {
                 let val_str = cmd.trim_start_matches("CELTSCALE").trim();
                 if val_str.is_empty() {
