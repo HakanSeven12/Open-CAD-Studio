@@ -456,7 +456,7 @@ fn tessellate_sub_local(
         _ => None,
     };
     let text_obb_local: Option<[[f32; 3]; 4]> =
-        crate::scene::text_obb_corners_native(sub, anno_scale, mtext_lines).map(|c| {
+        crate::entities::text_support::text_obb_corners_native(sub, anno_scale, mtext_lines).map(|c| {
             [
                 [(c[0][0] - lo_x) as f32, (c[0][1] - lo_y) as f32, (c[0][2] - lo_z) as f32],
                 [(c[1][0] - lo_x) as f32, (c[1][1] - lo_y) as f32, (c[1][2] - lo_z) as f32],
@@ -941,7 +941,7 @@ struct ExpandCtx<'a> {
 /// Fade `color` toward `bg` by 50%, preserving alpha. Used to mark xref
 /// geometry — the hue stays recognizable but the contrast against the
 /// background drops, reading as "washed out".
-pub(super) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+pub(crate) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     const T: f32 = 0.5;
     [
         color[0] * (1.0 - T) + bg[0] * T,

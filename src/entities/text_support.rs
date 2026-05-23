@@ -1,5 +1,5 @@
 use acadrust::types::aci_table::aci_to_rgb;
-use acadrust::CadDocument;
+use acadrust::{CadDocument, EntityType};
 
 use crate::scene::acad_to_truck::TextStroke;
 use crate::scene::cxf;
@@ -1364,3 +1364,334 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         v_offset,
     }
 }
+pub(crate) fn text_obb_corners_native(
+    e: &EntityType,
+    anno_scale: f32,
+    mtext_lines_override: Option<usize>,
+) -> Option<[[f64; 3]; 4]> {
+    use acadrust::entities::attribute_definition::{
+        HorizontalAlignment as AttrHA, VerticalAlignment as AttrVA,
+    };
+    use acadrust::entities::{AttachmentPoint, TextHorizontalAlignment, TextVerticalAlignment};
+
+    let anno = anno_scale as f64;
+
+    // Map Attribute alignment enums to the same h/v anchor fractions used by
+    // Text. Kept local because the Attribute enum is distinct from Text's.
+    let attr_h_anchor = |ha: AttrHA| -> f64 {
+        match ha {
+            AttrHA::Left => 0.0,
+            AttrHA::Center | AttrHA::Middle | AttrHA::Aligned | AttrHA::Fit => 0.5,
+            AttrHA::Right => 1.0,
+        }
+    };
+    let attr_v_anchor = |va: AttrVA| -> f64 {
+        match va {
+            AttrVA::Baseline | AttrVA::Bottom => 0.0,
+            AttrVA::Middle => 0.5,
+            AttrVA::Top => 1.0,
+        }
+    };
+    let attr_use_align_pt = |ha: AttrHA, va: AttrVA| -> bool {
+        !matches!((ha, va), (AttrHA::Left, AttrVA::Baseline))
+    };
+
+    let (ix, iy, iz, w, h, rot, h_anchor, v_anchor) = match e {
+        EntityType::Text(t) => {
+            let h_world = t.height * anno;
+            let w_factor = if t.width_factor > 0.0 { t.width_factor } else { 1.0 };
+            let n = t.value.chars().count().max(1) as f64;
+            // Approximate glyph width: AutoCAD's stroke fonts average ~0.6 em.
+            let w_world = n * h_world * w_factor * 0.6;
+            let h_anchor = match t.horizontal_alignment {
+                TextHorizontalAlignment::Left => 0.0,
+                TextHorizontalAlignment::Center
+                | TextHorizontalAlignment::Middle
+                | TextHorizontalAlignment::Aligned
+                | TextHorizontalAlignment::Fit => 0.5,
+                TextHorizontalAlignment::Right => 1.0,
+            };
+            let v_anchor = match t.vertical_alignment {
+                TextVerticalAlignment::Baseline | TextVerticalAlignment::Bottom => 0.0,
+                TextVerticalAlignment::Middle => 0.5,
+                TextVerticalAlignment::Top => 1.0,
+            };
+            // AutoCAD writes `alignment_point` (DXF 11) whenever the text
+            // isn't simple Left+Baseline; in that case it — not the
+            // insertion_point — is the anchor the alignment fractions map to.
+            let use_alignment_pt = !matches!(
+                (t.horizontal_alignment, t.vertical_alignment),
+                (
+                    TextHorizontalAlignment::Left,
+                    TextVerticalAlignment::Baseline,
+                )
+            );
+            let anchor = match (use_alignment_pt, t.alignment_point) {
+                (true, Some(p)) => p,
+                _ => t.insertion_point,
+            };
+            (
+                anchor.x,
+                anchor.y,
+                anchor.z,
+                w_world,
+                h_world,
+                t.rotation,
+                h_anchor,
+                v_anchor,
+            )
+        }
+        EntityType::AttributeDefinition(a) => {
+            let h_world = a.height * anno;
+            let w_factor = if a.width_factor > 0.0 { a.width_factor } else { 1.0 };
+            // Render the tag in preview when no default; matches `attribute.rs`.
+            let display = if a.default_value.is_empty() { &a.tag } else { &a.default_value };
+            let n = display.chars().count().max(1) as f64;
+            let w_world = n * h_world * w_factor * 0.6;
+            let h_anchor = attr_h_anchor(a.horizontal_alignment);
+            let v_anchor = attr_v_anchor(a.vertical_alignment);
+            let anchor = if attr_use_align_pt(a.horizontal_alignment, a.vertical_alignment) {
+                a.alignment_point
+            } else {
+                a.insertion_point
+            };
+            (
+                anchor.x, anchor.y, anchor.z, w_world, h_world, a.rotation, h_anchor, v_anchor,
+            )
+        }
+        EntityType::AttributeEntity(a) => {
+            let h_world = a.height * anno;
+            let w_factor = if a.width_factor > 0.0 { a.width_factor } else { 1.0 };
+            let n = a.value.chars().count().max(1) as f64;
+            let w_world = n * h_world * w_factor * 0.6;
+            let h_anchor = attr_h_anchor(a.horizontal_alignment);
+            let v_anchor = attr_v_anchor(a.vertical_alignment);
+            let anchor = if attr_use_align_pt(a.horizontal_alignment, a.vertical_alignment) {
+                a.alignment_point
+            } else {
+                a.insertion_point
+            };
+            (
+                anchor.x, anchor.y, anchor.z, w_world, h_world, a.rotation, h_anchor, v_anchor,
+            )
+        }
+        EntityType::Tolerance(t) => {
+            // Approximate: a feature control frame is roughly 1 line tall;
+            // width comes from char-count of the (already-stripped) text.
+            // GD&T symbols all advance one cell, so plain char count is close.
+            let raw_h = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            let h_world = raw_h * anno;
+            // Each cell ≈ 1.4 × height (matches `tolerance.rs` min_cell_w).
+            let n = t.text.chars().filter(|c| *c != '\n').count().max(1) as f64;
+            let w_world = h_world * 1.4 * n * 0.5; // rough — fine for LOD greek
+            // direction encodes rotation as a vector.
+            let rot = (t.direction.y).atan2(t.direction.x);
+            (
+                t.insertion_point.x,
+                t.insertion_point.y,
+                t.insertion_point.z,
+                w_world,
+                h_world * 1.5, // frame is taller than glyph cap by ~0.5 h
+                rot,
+                0.0, // anchored at insertion point (bottom-left)
+                0.0,
+            )
+        }
+        EntityType::MText(m) => {
+            let h_world = m.height * anno;
+            let raw_lines = (m.value.matches('\n').count() + 1) as f64;
+            let effective_lines = match mtext_lines_override {
+                Some(n) => n.max(1) as f64,
+                None => raw_lines,
+            };
+            let w_world = if m.rectangle_width > 0.0 {
+                m.rectangle_width
+            } else {
+                h_world * 8.0 * effective_lines.max(1.0)
+            };
+            // Wrap-aware override beats `rectangle_height` — the stored
+            // height can be stale on DWGs that were re-saved without
+            // updating the bounds.
+            let total_h = if mtext_lines_override.is_some() {
+                h_world * effective_lines.max(1.0) * m.line_spacing_factor.max(0.5)
+            } else {
+                m.rectangle_height.unwrap_or(
+                    h_world * raw_lines.max(1.0) * m.line_spacing_factor.max(0.5),
+                )
+            };
+            // MText `attachment_point` puts `insertion_point` at one of the
+            // 9 corners/midpoints of the text bbox. h_anchor / v_anchor are
+            // fractions from (left, bottom) of the bbox.
+            let (h_anchor, v_anchor) = match m.attachment_point {
+                AttachmentPoint::TopLeft => (0.0, 1.0),
+                AttachmentPoint::TopCenter => (0.5, 1.0),
+                AttachmentPoint::TopRight => (1.0, 1.0),
+                AttachmentPoint::MiddleLeft => (0.0, 0.5),
+                AttachmentPoint::MiddleCenter => (0.5, 0.5),
+                AttachmentPoint::MiddleRight => (1.0, 0.5),
+                AttachmentPoint::BottomLeft => (0.0, 0.0),
+                AttachmentPoint::BottomCenter => (0.5, 0.0),
+                AttachmentPoint::BottomRight => (1.0, 0.0),
+            };
+            (
+                m.insertion_point.x,
+                m.insertion_point.y,
+                m.insertion_point.z,
+                w_world,
+                total_h,
+                m.rotation,
+                h_anchor,
+                v_anchor,
+            )
+        }
+        _ => return None,
+    };
+
+    let x0 = -h_anchor * w;
+    let x1 = (1.0 - h_anchor) * w;
+    let y0 = -v_anchor * h;
+    let y1 = (1.0 - v_anchor) * h;
+
+    let (s, c) = (rot.sin(), rot.cos());
+    let rot_pt = |lx: f64, ly: f64| -> [f64; 3] {
+        let rx = lx * c - ly * s;
+        let ry = lx * s + ly * c;
+        [ix + rx, iy + ry, iz]
+    };
+
+    Some([
+        rot_pt(x0, y0),
+        rot_pt(x1, y0),
+        rot_pt(x1, y1),
+        rot_pt(x0, y1),
+    ])
+}
+pub(crate) fn text_baseline_points(
+    e: &EntityType,
+    anno_scale: f32,
+    world_offset: [f64; 3],
+    n_lines: usize,
+) -> Vec<[f32; 3]> {
+    let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
+        return vec![];
+    };
+    let line_h = match e {
+        EntityType::Text(t) => (t.height * anno_scale as f64) as f32,
+        EntityType::MText(m) => (m.height * anno_scale as f64) as f32,
+        EntityType::AttributeDefinition(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::AttributeEntity(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::Tolerance(t) => {
+            let raw = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            (raw * anno_scale as f64) as f32
+        }
+        _ => return vec![],
+    };
+    if line_h <= 0.0 {
+        return vec![];
+    }
+    let n_lines = n_lines.max(1);
+    let [ox, oy, oz] = world_offset;
+    let cast = |p: [f64; 3]| -> [f32; 3] {
+        [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
+    };
+    let bl = cast(corners[0]);
+    let br = cast(corners[1]);
+    let full_tl = cast(corners[3]);
+
+    let (ux, uy, uz) = (full_tl[0] - bl[0], full_tl[1] - bl[1], full_tl[2] - bl[2]);
+    let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
+    if ulen < 1e-9 {
+        return vec![bl, br];
+    }
+    let (nx, ny, nz) = (ux / ulen, uy / ulen, uz / ulen);
+
+    let mut pts = Vec::with_capacity(n_lines * 3);
+    for i in 0..n_lines {
+        // i = 0 is the topmost line — its bottom sits one line_h below
+        // the OBB top (≈ `ulen`). For n_lines > ulen/line_h the deepest
+        // baselines clamp to the OBB bottom.
+        let bot_off = ((i + 1) as f32) * line_h;
+        let along = (ulen - bot_off).max(0.0);
+        let p0 = [bl[0] + nx * along, bl[1] + ny * along, bl[2] + nz * along];
+        let p1 = [br[0] + nx * along, br[1] + ny * along, br[2] + nz * along];
+        if !pts.is_empty() {
+            pts.push([f32::NAN; 3]);
+        }
+        pts.extend_from_slice(&[p0, p1]);
+    }
+    pts
+}
+
+/// Filled tris for a greeked top-level Text / MText. One 2-triangle rect
+/// per visible line — `n_lines` is the actual rendered line count from
+/// `mtext_line_count` (1 for Text). Stacked top → bottom along the OBB's
+/// up direction. The face3d pipeline skips its 0.45 dim for wires with
+/// empty `points`, so these tris render at the literal text color.
+pub(crate) fn text_greek_obb_tris(
+    e: &EntityType,
+    anno_scale: f32,
+    world_offset: [f64; 3],
+    n_lines: usize,
+) -> Vec<[f32; 3]> {
+    let Some(corners) = text_obb_corners_native(e, anno_scale, Some(n_lines)) else {
+        return vec![];
+    };
+    let line_h = match e {
+        EntityType::Text(t) => (t.height * anno_scale as f64) as f32,
+        EntityType::MText(m) => (m.height * anno_scale as f64) as f32,
+        EntityType::AttributeDefinition(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::AttributeEntity(a) => (a.height * anno_scale as f64) as f32,
+        EntityType::Tolerance(t) => {
+            let raw = if t.text_height > 0.0 { t.text_height } else { 2.5 };
+            (raw * anno_scale as f64) as f32
+        }
+        _ => return vec![],
+    };
+    if line_h <= 0.0 {
+        return vec![];
+    }
+    let n_lines = n_lines.max(1);
+    let [ox, oy, oz] = world_offset;
+    let cast = |p: [f64; 3]| -> [f32; 3] {
+        [(p[0] - ox) as f32, (p[1] - oy) as f32, (p[2] - oz) as f32]
+    };
+    let bl = cast(corners[0]);
+    let br = cast(corners[1]);
+    let full_tl = cast(corners[3]);
+
+    let (ux, uy, uz) = (full_tl[0] - bl[0], full_tl[1] - bl[1], full_tl[2] - bl[2]);
+    let ulen = (ux * ux + uy * uy + uz * uz).sqrt();
+    if ulen < 1e-9 {
+        return vec![];
+    }
+    let (nx, ny, nz) = (ux / ulen, uy / ulen, uz / ulen);
+
+    let mut tris = Vec::with_capacity(n_lines * 6);
+    for i in 0..n_lines {
+        let top_along = (ulen - (i as f32) * line_h).max(0.0);
+        let bot_along = (ulen - ((i + 1) as f32) * line_h).max(0.0);
+        let tl = [
+            bl[0] + nx * top_along,
+            bl[1] + ny * top_along,
+            bl[2] + nz * top_along,
+        ];
+        let tr = [
+            br[0] + nx * top_along,
+            br[1] + ny * top_along,
+            br[2] + nz * top_along,
+        ];
+        let lbl = [
+            bl[0] + nx * bot_along,
+            bl[1] + ny * bot_along,
+            bl[2] + nz * bot_along,
+        ];
+        let lbr = [
+            br[0] + nx * bot_along,
+            br[1] + ny * bot_along,
+            br[2] + nz * bot_along,
+        ];
+        tris.extend_from_slice(&[lbl, lbr, tr, lbl, tr, tl]);
+    }
+    tris
+}
+

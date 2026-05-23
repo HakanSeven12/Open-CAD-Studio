@@ -1,11 +1,14 @@
 use acadrust::entities::Insert;
 use acadrust::types::{Transform, Vector3};
+use acadrust::{EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, parse_f64, ro_prop as ro, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::object::{GripApply, GripDef, PropSection};
+use crate::scene::{block_cache, render, tessellate};
+use crate::scene::wire_model::WireModel;
 
 fn grips(ins: &Insert) -> Vec<GripDef> {
     let p = Vec3::new(
@@ -142,3 +145,75 @@ impl crate::entities::traits::FallbackTess for Insert {
         )
     }
 }
+pub(crate) fn append_insert_attribute_wires(
+    wires: &mut Vec<WireModel>,
+    document: &acadrust::CadDocument,
+    ins: &acadrust::entities::Insert,
+    insert_handle: Handle,
+    sel: bool,
+    ins_color: [f32; 4],
+    ins_pat_len: f32,
+    ins_pat: [f32; 8],
+    ins_lw_px: f32,
+    bg_color: [f32; 4],
+    is_xref: bool,
+    pslt_factor: f32,
+    anno_scale: f32,
+    world_offset: [f64; 3],
+) {
+    if ins.attributes.is_empty() {
+        return;
+    }
+    // ATTMODE (header.attribute_visibility):
+    //   0 = Off    — every attribute hidden
+    //   1 = Normal — honour per-attribute `invisible` flag (default)
+    //   2 = On     — every attribute forced visible, ignoring its flag
+    let attmode = document.header.attribute_visibility;
+    if attmode == 0 {
+        return;
+    }
+    for attr in &ins.attributes {
+        let per_attr_hidden = attr.common.invisible || attr.flags.invisible;
+        if attmode == 1 && per_attr_hidden {
+            continue;
+        }
+        let attr_entity = EntityType::AttributeEntity(attr.clone());
+        let (sub_color, sub_plen, sub_pat, sub_lw_px, sub_aci) =
+            render::render_style_for_block_sub(
+                document,
+                &attr_entity,
+                ins_color,
+                ins_pat_len,
+                ins_pat,
+                ins_lw_px,
+            );
+        let sub_color = render::adapt_to_bg(sub_color, bg_color);
+        let sub_color = if is_xref && !sel {
+            block_cache::fade_toward_bg(sub_color, bg_color)
+        } else {
+            sub_color
+        };
+        let sub_aabb = crate::scene::entity_aabb(&attr_entity, world_offset);
+        let mut attr_wires = tessellate::tessellate(
+            document,
+            insert_handle,
+            &attr_entity,
+            sel,
+            sub_color,
+            sub_plen * pslt_factor,
+            sub_pat.map(|v| v * pslt_factor),
+            sub_lw_px,
+            world_offset,
+            anno_scale,
+        );
+        // Use the INSERT's handle so selection / picking groups attribute
+        // text with the parent insert instead of treating it as a stray text.
+        for w in &mut attr_wires {
+            w.name = insert_handle.value().to_string();
+            w.aci = sub_aci;
+            w.aabb = sub_aabb;
+        }
+        wires.extend(attr_wires);
+    }
+}
+

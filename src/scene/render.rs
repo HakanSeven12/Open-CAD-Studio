@@ -279,7 +279,7 @@ pub(super) fn render_style_for(
 /// Like `render_style_for` but resolves ByBlock properties by inheriting from
 /// the INSERT entity's already-resolved style. Call this for exploded block
 /// sub-entities so that ByBlock color/linetype/lineweight propagate correctly.
-pub(super) fn render_style_for_block_sub(
+pub(crate) fn render_style_for_block_sub(
     document: &CadDocument,
     e: &EntityType,
     insert_color: [f32; 4],
@@ -314,7 +314,7 @@ pub(super) fn render_style_for_block_sub(
 /// Adapt white→black or black→white based on background luminance.
 /// White entities on light backgrounds become black, black entities on dark
 /// backgrounds become white. All other colors pass through unchanged.
-pub(super) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+pub(crate) fn adapt_to_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     let lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2];
     let is_white = color[0] > 0.95 && color[1] > 0.95 && color[2] > 0.95;
     let is_black = color[0] < 0.05 && color[1] < 0.05 && color[2] < 0.05;
