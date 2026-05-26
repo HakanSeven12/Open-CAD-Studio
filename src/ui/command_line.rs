@@ -149,7 +149,7 @@ impl CommandLine {
                         a: 1.0,
                     },
                     width: 1.0,
-                    radius: 0.0.into(),
+                    radius: 2.0.into(),
                 },
                 icon: Color::WHITE,
                 placeholder: Color {
@@ -183,7 +183,7 @@ impl CommandLine {
                     border: Border {
                         color: BORDER_COLOR,
                         width: 1.0,
-                        radius: 0.0.into()
+                        radius: 3.0.into()
                     },
                     ..Default::default()
                 })
@@ -194,11 +194,11 @@ impl CommandLine {
             border: Border {
                 color: BORDER_COLOR,
                 width: 1.0,
-                radius: 0.0.into(),
+                radius: 4.0.into(),
             },
             ..Default::default()
         })
-        .width(Length::Fill)
+        .width(Length::Fixed(720.0))
         .into()
     }
 }

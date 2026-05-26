@@ -504,10 +504,28 @@ impl OpenCADStudio {
             Space::new().into()
         };
 
-        let center_stack =
-            iced::widget::stack![row![properties_el, viewport_stack].width(Fill).height(Fill),]
-                .width(Fill)
-                .height(Fill);
+        // Command-line sits as a bottom-centre overlay on top of the
+        // viewport stack rather than as a separate row in the main
+        // column — frees up vertical space when no command is active
+        // and keeps the input close to where the cursor is drawing.
+        let command_line_overlay = iced::widget::container(self.command_line.view())
+            .width(Fill)
+            .height(Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Bottom)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 0.0,
+                bottom: 2.0,
+                left: 0.0,
+            });
+
+        let center_stack = iced::widget::stack![
+            row![properties_el, viewport_stack].width(Fill).height(Fill),
+            command_line_overlay,
+        ]
+        .width(Fill)
+        .height(Fill);
 
         let main_ui = container({
             let mut col = column![self.ribbon.view(
@@ -519,7 +537,6 @@ impl OpenCADStudio {
                 col = col.push(doc_tab_bar(&self.tabs, self.active_tab));
             }
             col.push(center_stack)
-                .push(self.command_line.view())
                 .push({
                     let is_model = tab.scene.current_layout == "Model";
                     let scale_pill_enabled = is_model
