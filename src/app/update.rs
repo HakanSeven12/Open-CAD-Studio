@@ -1974,6 +1974,19 @@ impl OpenCADStudio {
                     }
                 }
 
+                // Tiled Model layout: clicking a non-active tile activates
+                // it (swapping in its camera) instead of selecting / drawing.
+                if self.tabs[i].active_cmd.is_none() && vw > 1.0 && vh > 1.0 {
+                    if self
+                        .tabs[i]
+                        .scene
+                        .set_active_model_tile_at(p.x / vw, p.y / vh)
+                    {
+                        self.tabs[i].scene.camera_generation += 1;
+                        return Task::none();
+                    }
+                }
+
                 if self.tabs[i].active_cmd.is_none() && !self.tabs[i].selected_grips.is_empty() {
                     if let Some(handle) = self.tabs[i].selected_handle {
                         let is_paper = self.tabs[i].scene.current_layout != "Model";
