@@ -471,21 +471,79 @@ impl OpenCADStudio {
                     .height(Fill),
                 selection_overlay,
                 viewport_mouse,
-                // Toggle sits ABOVE the viewport mouse_area so clicks
-                // inside the toggle's bounds reach it instead of the
-                // shader behind it; `opaque` blocks the same clicks from
-                // bubbling further down. Outside the toggle's footprint
-                // the outer Fill container is transparent — viewport
-                // drawing / selection stays unaffected.
+            ]
+            .width(Fill)
+            .height(Fill)
+        };
+
+        // Model-space render-mode picker, top-left. Sits ABOVE the
+        // viewport mouse_area so clicks inside its bounds reach it
+        // instead of the shader behind it; `opaque` stops them bubbling
+        // further. Outside the chip the Fill container is transparent so
+        // viewport drawing / selection is unaffected. In a paper layout
+        // the active viewport gets its own picker (below) instead.
+        if !is_paper && !tab.is_start {
+            viewport_stack = viewport_stack.push(
                 container(iced::widget::opaque(info))
                     .width(Fill)
                     .height(Fill)
                     .align_x(iced::alignment::Horizontal::Left)
                     .align_y(iced::alignment::Vertical::Top),
+            );
+        }
+
+        // Active paper-space viewport overlays: a render-mode picker in
+        // its top-left corner and a ViewCube hit area in its top-right,
+        // both layered ABOVE the viewport mouse_area so they receive
+        // clicks (the paper canvas itself sits below it). Positioned with
+        // leading Spaces sized to the viewport's screen rectangle.
+        let active_vp_rect: Option<iced::Rectangle> = if is_paper && !tab.is_start {
+            tab.scene.active_viewport.and_then(|h| {
+                let (cw, ch) = tab.scene.selection.borrow().vp_size;
+                tab.scene.viewport_screen_rect(h, (cw, ch))
+            })
+        } else {
+            None
+        };
+        if let Some(rect) = active_vp_rect {
+            let x = rect.x.max(0.0);
+            let y = rect.y.max(0.0);
+            let vp_mode = tab
+                .scene
+                .active_viewport_render_mode()
+                .unwrap_or(acadrust::entities::ViewportRenderMode::Wireframe2D);
+            let picker_layer = column![
+                Space::new().height(iced::Length::Fixed(y + 4.0)),
+                row![
+                    Space::new().width(iced::Length::Fixed(x + 4.0)),
+                    iced::widget::opaque(render_mode_picker(vp_mode)),
+                ],
             ]
             .width(Fill)
-            .height(Fill)
-        };
+            .height(Fill);
+            viewport_stack = viewport_stack.push(picker_layer);
+
+            if self.show_viewcube {
+                let cube_x = (rect.x + rect.width - VIEWCUBE_HIT_SIZE - VIEWCUBE_PAD).max(0.0);
+                let cube_y = (rect.y + VIEWCUBE_PAD).max(0.0);
+                let cube_click = column![
+                    Space::new().height(iced::Length::Fixed(cube_y)),
+                    row![
+                        Space::new().width(iced::Length::Fixed(cube_x)),
+                        mouse_area(
+                            iced::widget::Space::new()
+                                .width(iced::Length::Fixed(VIEWCUBE_HIT_SIZE))
+                                .height(iced::Length::Fixed(VIEWCUBE_HIT_SIZE)),
+                        )
+                        .on_move(Message::CursorMoved)
+                        .on_press(Message::ViewportClick),
+                    ],
+                ]
+                .width(Fill)
+                .height(Fill);
+                viewport_stack = viewport_stack.push(cube_click);
+            }
+        }
 
         if self.show_viewcube && !is_paper && !tab.is_start {
             let cube_click: Element<'_, Message> = container(
@@ -889,23 +947,12 @@ fn paper_canvas_view<'a>(tab: &'a super::document::DocumentTab) -> Element<'a, M
             .width(Fill)
             .height(Fill);
 
-            // Render-mode picker in the active viewport's top-left corner,
-            // mirroring the model-space overlay. Reads / writes the
-            // viewport entity's own render mode via SetRenderMode.
-            let vp_mode = scene
-                .active_viewport_render_mode()
-                .unwrap_or(acadrust::entities::ViewportRenderMode::Wireframe2D);
-            let picker_layer = column![
-                Space::new().height(iced::Length::Fixed(y + 4.0)),
-                row![
-                    Space::new().width(iced::Length::Fixed(x + 4.0)),
-                    iced::widget::opaque(render_mode_picker(vp_mode)),
-                ],
-            ]
-            .width(Fill)
-            .height(Fill);
-
-            return stack![paper_sheet, positioned, border_layer, picker_layer]
+            // The render-mode picker and ViewCube hit area for the active
+            // viewport are layered in the main view stack (above the
+            // viewport mouse_area) so they're clickable — see
+            // `view()`. Here we only draw the sheet, the 3-D content, and
+            // the highlight border.
+            return stack![paper_sheet, positioned, border_layer]
                 .width(Fill)
                 .height(Fill)
                 .into();

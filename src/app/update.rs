@@ -1570,11 +1570,26 @@ impl OpenCADStudio {
 
             // ── Cursor / viewport messages ─────────────────────────────────
             Message::CursorMoved(p) => {
-                let (vw, _vh) = self.tabs[self.active_tab].scene.selection.borrow().vp_size;
-                self.cursor_pos = iced::Point::new(
-                    vw - VIEWCUBE_PAD - VIEWCUBE_HIT_SIZE + p.x,
-                    VIEWCUBE_PAD + p.y,
-                );
+                // `p` is relative to the ViewCube hit area's top-left. Map
+                // it back to full-canvas coordinates so ViewportClick's
+                // hit-test lines up. The hit area sits in the top-right of
+                // the full canvas in model space, or of the active
+                // viewport's screen rectangle in a paper layout.
+                let i = self.active_tab;
+                let (vw, _vh) = self.tabs[i].scene.selection.borrow().vp_size;
+                let (ox, oy) = match self
+                    .tabs[i]
+                    .scene
+                    .active_viewport
+                    .and_then(|h| self.tabs[i].scene.viewport_screen_rect(h, (vw, _vh)))
+                {
+                    Some(rect) => (
+                        rect.x + rect.width - VIEWCUBE_PAD - VIEWCUBE_HIT_SIZE,
+                        rect.y + VIEWCUBE_PAD,
+                    ),
+                    None => (vw - VIEWCUBE_PAD - VIEWCUBE_HIT_SIZE, VIEWCUBE_PAD),
+                };
+                self.cursor_pos = iced::Point::new(ox + p.x, oy + p.y);
                 Task::none()
             }
 
@@ -2637,14 +2652,26 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let rot = self.tabs[i].scene.active_view_rotation_mat();
                 let (vw, vh) = self.tabs[i].scene.selection.borrow().vp_size;
-                if let Some(region) = scene::hit_test(
-                    self.cursor_pos.x,
-                    self.cursor_pos.y,
-                    vw,
-                    vh,
-                    rot,
-                    VIEWCUBE_PX,
-                ) {
+                // The ViewCube draws in the top-right of whichever area
+                // owns it: the full canvas in model space, or the active
+                // viewport's screen rectangle in a paper layout. Map the
+                // cursor into that area before hit-testing so paper-space
+                // picks line up with the gizmo.
+                let (cx, cy, w, h) = match self
+                    .tabs[i]
+                    .scene
+                    .active_viewport
+                    .and_then(|hndl| self.tabs[i].scene.viewport_screen_rect(hndl, (vw, vh)))
+                {
+                    Some(rect) => (
+                        self.cursor_pos.x - rect.x,
+                        self.cursor_pos.y - rect.y,
+                        rect.width,
+                        rect.height,
+                    ),
+                    None => (self.cursor_pos.x, self.cursor_pos.y, vw, vh),
+                };
+                if let Some(region) = scene::hit_test(cx, cy, w, h, rot, VIEWCUBE_PX) {
                     return Task::done(Message::ViewCubeSnap(region));
                 }
                 Task::none()
