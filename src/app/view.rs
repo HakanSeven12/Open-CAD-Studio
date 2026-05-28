@@ -2124,6 +2124,7 @@ fn dyn_component_label(c: DynComponent) -> String {
     match c {
         DynComponent::X => "X".into(),
         DynComponent::Y => "Y".into(),
+        DynComponent::Z => "Z".into(),
         DynComponent::Distance => "d".into(),
         DynComponent::Angle => "<".into(),
     }
@@ -2143,9 +2144,18 @@ fn dyn_component_value(
     let b = base.unwrap_or(glam::Vec3::ZERO);
     let dx = (w.x - b.x) as f64;
     let dy = (w.y - b.y) as f64;
+    // When a base point exists (DYN-on after the first pick) the cartesian
+    // fields show relative deltas — matching the typed-value convention
+    // in `dyn_resolve_point` so the live preview and the committed
+    // coordinate use the same frame. See #35.
+    let has_base = base.is_some();
     match f.component {
+        DynComponent::X if has_base => format!("{:.4}", dx),
+        DynComponent::Y if has_base => format!("{:.4}", dy),
+        DynComponent::Z if has_base => "0.0000".to_string(),
         DynComponent::X => format!("{:.4}", w.x),
         DynComponent::Y => format!("{:.4}", w.y),
+        DynComponent::Z => format!("{:.4}", b.z),
         DynComponent::Distance => format!("{:.4}", (dx * dx + dy * dy).sqrt()),
         DynComponent::Angle => format!("{:.1}", dy.atan2(dx).to_degrees().rem_euclid(360.0)),
     }

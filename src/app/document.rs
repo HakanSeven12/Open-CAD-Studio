@@ -20,6 +20,9 @@ pub(super) enum DynComponent {
     X,
     /// Absolute Y ordinate.
     Y,
+    /// Absolute Z ordinate (only visible after the user types a second
+    /// `,` separator from a cartesian X/Y configuration).
+    Z,
     /// Linear distance from the last point.
     Distance,
     /// Angle from the last point, in degrees.

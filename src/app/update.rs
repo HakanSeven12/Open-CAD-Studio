@@ -883,13 +883,27 @@ impl OpenCADStudio {
                 // glyph(s). `Tab`, etc. arrive as Named keys, not here.
                 if s.chars().all(|c| !c.is_control()) {
                     let i = self.active_tab;
+                    // `,` is the coordinate separator in dynamic input,
+                    // not a decimal point: typing it locks the current
+                    // field's buffer and advances to the next coordinate,
+                    // reshaping the field set when going polar → cartesian
+                    // (Distance → X, Y) or 2-D → 3-D (X, Y → X, Y, Z).
+                    // See #35.
+                    if s == ","
+                        && self.dyn_input
+                        && !self.tabs[i].dyn_fields.is_empty()
+                    {
+                        self.dyn_comma_advance();
+                        self.command_line.autocomplete_cursor = None;
+                        return self.focus_cmd_input();
+                    }
                     // While dynamic input is showing fields, numeric
                     // glyphs edit the focused field instead of the
                     // command line. Letters still go to the command line
                     // so command-option keywords keep working.
                     let numeric = !s.is_empty()
                         && s.chars()
-                            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+'));
+                            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'));
                     if numeric && self.dyn_input && !self.tabs[i].dyn_fields.is_empty() {
                         let a = self.tabs[i].dyn_active.min(self.tabs[i].dyn_fields.len() - 1);
                         self.tabs[i].dyn_fields[a]
@@ -5370,7 +5384,7 @@ impl OpenCADStudio {
             .map(|c| c.dyn_field())
             .unwrap_or(crate::command::DynField::Point);
         let has_base = self.last_point.is_some();
-        let desired: Vec<DynComponent> = match field {
+        let default: Vec<DynComponent> = match field {
             crate::command::DynField::Distance => vec![DynComponent::Distance],
             crate::command::DynField::Angle => vec![DynComponent::Angle],
             crate::command::DynField::Point if has_base => {
@@ -5378,10 +5392,30 @@ impl OpenCADStudio {
             }
             crate::command::DynField::Point => vec![DynComponent::X, DynComponent::Y],
         };
+        // Multiple shapes can satisfy the same command request — e.g. a
+        // `Point` is happy with either `[Distance, Angle]` (polar) or
+        // `[X, Y]` / `[X, Y, Z]` (cartesian). If the user already
+        // reshaped via `,` (see #35) the existing set is still a valid
+        // Point configuration and must not be reverted on every mouse
+        // move.
         let current: Vec<DynComponent> =
             self.tabs[i].dyn_fields.iter().map(|f| f.component).collect();
-        if current != desired {
-            self.tabs[i].dyn_fields = desired.into_iter().map(DynFieldEntry::new).collect();
+        let current_is_acceptable = match field {
+            crate::command::DynField::Distance => {
+                matches!(current.as_slice(), [DynComponent::Distance])
+            }
+            crate::command::DynField::Angle => {
+                matches!(current.as_slice(), [DynComponent::Angle])
+            }
+            crate::command::DynField::Point => matches!(
+                current.as_slice(),
+                [DynComponent::Distance, DynComponent::Angle]
+                    | [DynComponent::X, DynComponent::Y]
+                    | [DynComponent::X, DynComponent::Y, DynComponent::Z]
+            ),
+        };
+        if !current_is_acceptable {
+            self.tabs[i].dyn_fields = default.into_iter().map(DynFieldEntry::new).collect();
             self.tabs[i].dyn_active = 0;
         }
     }
@@ -5431,10 +5465,29 @@ impl OpenCADStudio {
         let live_d = (dx * dx + dy * dy).sqrt();
         let live_a = dy.atan2(dx); // radians
         let comps: Vec<DynComponent> = fields.iter().map(|f| f.component).collect();
+        // DYN-on defaults to RELATIVE coordinates when a base point is set
+        // (see #26 / #35). The live cartesian fallback is the cursor
+        // position relative to base; typed values are relative deltas.
+        let has_base = self.last_point.is_some();
         match comps.as_slice() {
+            [DynComponent::X, DynComponent::Y] if has_base => {
+                Some(glam::Vec3::new(base.x + val(0, dx), base.y + val(1, dy), base.z))
+            }
             [DynComponent::X, DynComponent::Y] => {
                 Some(glam::Vec3::new(val(0, w.x), val(1, w.y), base.z))
             }
+            [DynComponent::X, DynComponent::Y, DynComponent::Z] if has_base => {
+                Some(glam::Vec3::new(
+                    base.x + val(0, dx),
+                    base.y + val(1, dy),
+                    base.z + val(2, 0.0),
+                ))
+            }
+            [DynComponent::X, DynComponent::Y, DynComponent::Z] => Some(glam::Vec3::new(
+                val(0, w.x),
+                val(1, w.y),
+                val(2, base.z),
+            )),
             [DynComponent::Distance, DynComponent::Angle] => {
                 let d = val(0, live_d);
                 let a = val(1, live_a.to_degrees()).to_radians();
@@ -5455,6 +5508,61 @@ impl OpenCADStudio {
                 ))
             }
             _ => None,
+        }
+    }
+
+    /// Handle `,` while a dynamic-input field set is showing. Locks the
+    /// current field's buffer if it has one, then either advances within
+    /// the existing field set or reshapes it: a polar `[Distance, Angle]`
+    /// configuration becomes cartesian `[X(buf), Y]`, and a cartesian
+    /// `[X, Y]` configuration extends to `[X, Y, Z]`. Default fallthrough
+    /// is "advance to next field", matching `Tab`. See #35.
+    fn dyn_comma_advance(&mut self) {
+        use super::document::{DynComponent, DynFieldEntry};
+        let i = self.active_tab;
+        if self.tabs[i].dyn_fields.is_empty() {
+            return;
+        }
+        let active = self
+            .tabs[i]
+            .dyn_active
+            .min(self.tabs[i].dyn_fields.len() - 1);
+        let comps: Vec<DynComponent> = self
+            .tabs[i]
+            .dyn_fields
+            .iter()
+            .map(|f| f.component)
+            .collect();
+        let cur_buf = self.tabs[i].dyn_fields[active].buffer.clone();
+        match (comps.as_slice(), active) {
+            // First polar field — `,` switches to cartesian, locking the
+            // typed value as X.
+            ([DynComponent::Distance, DynComponent::Angle], 0)
+            | ([DynComponent::Distance], 0) => {
+                let mut x_field = DynFieldEntry::new(DynComponent::X);
+                x_field.buffer = cur_buf;
+                self.tabs[i].dyn_fields =
+                    vec![x_field, DynFieldEntry::new(DynComponent::Y)];
+                self.tabs[i].dyn_active = 1;
+            }
+            // Already cartesian X (first field) — just advance to Y.
+            ([DynComponent::X, DynComponent::Y], 0)
+            | ([DynComponent::X, DynComponent::Y, DynComponent::Z], 0) => {
+                self.tabs[i].dyn_active = 1;
+            }
+            // Cartesian Y — extend to 3-D by appending Z.
+            ([DynComponent::X, DynComponent::Y], 1) => {
+                self.tabs[i]
+                    .dyn_fields
+                    .push(DynFieldEntry::new(DynComponent::Z));
+                self.tabs[i].dyn_active = 2;
+            }
+            // Cartesian Y in the 3-D set — advance to Z.
+            ([DynComponent::X, DynComponent::Y, DynComponent::Z], 1) => {
+                self.tabs[i].dyn_active = 2;
+            }
+            // Z, Angle, or any singleton: nothing further to advance to.
+            _ => {}
         }
     }
 
