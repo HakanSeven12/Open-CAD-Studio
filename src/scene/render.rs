@@ -339,6 +339,32 @@ fn uv_crop_axis(pos: f32, size: f32) -> (f32, f32) {
     (left_off / size, visible / size)
 }
 
+/// Apply a clip-space crop to `view_proj` so the sub-rect of the original
+/// view defined by UV offset `(uo, vo)` + scale `(us, vs)` is remapped to
+/// NDC `[-1, 1]^2`. Identity transform when the sub-rect is the whole
+/// view (`uo=vo=0`, `us=vs=1`). Used by viewports that hang off the
+/// canvas — the camera frustum stays at full-vp aspect, but only the
+/// visible portion lands in the MSAA target.
+fn crop_view_proj(view_proj: glam::Mat4, uo: f32, vo: f32, us: f32, vs: f32) -> glam::Mat4 {
+    // Build the matrix that maps the visible clip-space sub-rect
+    //   x ∈ [2uo - 1, 2(uo+us) - 1]
+    //   y ∈ [1 - 2(vo+vs), 1 - 2vo]
+    // back to NDC [-1, 1]^2. (Texture v is top-down → camera y flips.)
+    let us = us.max(1e-6);
+    let vs = vs.max(1e-6);
+    let sx = 1.0 / us;
+    let sy = 1.0 / vs;
+    let tx = (1.0 - 2.0 * uo - us) / us;
+    let ty = -(1.0 - 2.0 * vo - vs) / vs;
+    let crop = glam::Mat4::from_cols_array(&[
+        sx, 0.0, 0.0, 0.0, // col 0
+        0.0, sy, 0.0, 0.0, // col 1
+        0.0, 0.0, 1.0, 0.0, // col 2
+        tx, ty, 0.0, 1.0, // col 3
+    ]);
+    crop * view_proj
+}
+
 // ── Render-style helpers (impl Scene) ────────────────────────────────────
 
 impl Scene {
@@ -510,7 +536,7 @@ impl Scene {
         let bg_color = [0.0, 0.0, 0.0, 0.0];
         let viewports: Vec<ViewportData> = instances
             .iter()
-            .map(|inst| self.viewport_data_for(inst, canvas, hover_region))
+            .filter_map(|inst| self.viewport_data_for(inst, canvas, hover_region))
             .collect();
         // Empty viewports → blit nothing. The widget container's
         // background (model bg or the PaperCanvas widget below) stays
@@ -527,9 +553,32 @@ impl Scene {
         inst: &ViewportInstance,
         canvas: (f32, f32),
         hover_region: Option<usize>,
-    ) -> ViewportData {
+    ) -> Option<ViewportData> {
         let flags = render_mode_flags(inst.render_mode);
         let view_wireframe = !flags.face3d_fill;
+
+        // Clip the viewport rect to the canvas; size the per-viewport MSAA
+        // / depth / resolve textures to that visible portion. Sizing them
+        // to the full vp rect would blow past wgpu's per-dimension texture
+        // limit (8192 on common GPUs) once paper-space zoom grows the rect
+        // far enough off the canvas.
+        let full = inst.screen_rect;
+        if full.width <= 0.0 || full.height <= 0.0 {
+            return None;
+        }
+        let visible_x = full.x.max(0.0);
+        let visible_y = full.y.max(0.0);
+        let visible_x_end = (full.x + full.width).min(canvas.0);
+        let visible_y_end = (full.y + full.height).min(canvas.1);
+        let visible_w = (visible_x_end - visible_x).max(0.0);
+        let visible_h = (visible_y_end - visible_y).max(0.0);
+        if visible_w < 1.0 || visible_h < 1.0 {
+            return None;
+        }
+        let uo = ((visible_x - full.x) / full.width).clamp(0.0, 1.0);
+        let vo = ((visible_y - full.y) / full.height).clamp(0.0, 1.0);
+        let us = (visible_w / full.width).clamp(0.0, 1.0);
+        let vs = (visible_h / full.height).clamp(0.0, 1.0);
 
         let base_arc = if inst.handle == acadrust::Handle::NULL {
             self.entity_wires_arc()
@@ -548,25 +597,41 @@ impl Scene {
             Arc::new(v)
         };
 
-        // Camera uniforms use the viewport's pixel size for aspect / ortho.
-        let bounds_px = Rectangle {
+        // Build the camera at the *full* viewport's aspect so the ortho
+        // frustum matches what the viewport entity stores, then post-
+        // multiply by a clip-space "zoom into the visible sub-rect" that
+        // maps the visible portion to NDC [-1, 1]. Geometry passes
+        // rasterize into a visible-sized MSAA, so `viewport_size` (used
+        // by the wire shader to extrude line thickness in screen pixels)
+        // must be the visible size — but `world_per_pixel` is invariant
+        // under cropping (full_h cancels with vs) so the value computed
+        // from the full bounds is the one we want.
+        let full_bounds = Rectangle {
             x: 0.0,
             y: 0.0,
-            width: inst.screen_rect.width.max(1.0),
-            height: inst.screen_rect.height.max(1.0),
+            width: full.width.max(1.0),
+            height: full.height.max(1.0),
         };
         let mut uniforms =
-            Uniforms::new(&inst.camera, bounds_px, self.document.header.lineweight_display);
+            Uniforms::new(&inst.camera, full_bounds, self.document.header.lineweight_display);
+        uniforms.view_proj = crop_view_proj(uniforms.view_proj, uo, vo, us, vs);
+        uniforms.viewport_size = [visible_w, visible_h];
         uniforms.flat_shade = if flags.flat_shade { 1.0 } else { 0.0 };
 
+        // `screen_rect` carries the *visible* sub-rectangle in normalized
+        // canvas coords — that's what `Pipeline::prepare` uses to size
+        // the per-viewport textures and what `Primitive::render` uses to
+        // pick the surface destination. The UV crop uniform reads as
+        // identity here, since the texture already covers exactly the
+        // visible portion.
         let screen_rect = Rectangle {
-            x: inst.screen_rect.x / canvas.0,
-            y: inst.screen_rect.y / canvas.1,
-            width: inst.screen_rect.width / canvas.0,
-            height: inst.screen_rect.height / canvas.1,
+            x: visible_x / canvas.0,
+            y: visible_y / canvas.1,
+            width: visible_w / canvas.0,
+            height: visible_h / canvas.1,
         };
 
-        ViewportData {
+        Some(ViewportData {
             wires: all_wires,
             face3d_wires: Arc::new(face3d_wires),
             hatches: self.hatch_models_arc(),
@@ -586,7 +651,7 @@ impl Scene {
             geometry_epoch: self.geometry_epoch,
             camera_generation: self.camera_generation,
             screen_rect,
-        }
+        })
     }
 
     /// Update viewcube hover state from cursor position within `bounds`.
