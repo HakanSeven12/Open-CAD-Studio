@@ -721,6 +721,17 @@ impl Scene {
         self.geometry_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Switch the active layout. Bumps `geometry_epoch` so the wire cache
+    /// re-tessellates — `render_style`'s `adapt_to_bg` picks the model or
+    /// paper background depending on `current_layout`, so cached wires
+    /// from the previous layout would be coloured against the wrong bg.
+    pub fn set_current_layout(&mut self, name: String) {
+        if self.current_layout != name {
+            self.current_layout = name;
+            self.bump_geometry();
+        }
+    }
+
     /// Returns true if this viewport should display model-space content
     /// (i.e. it is a user viewport, not the sheet/overall viewport).
     ///
@@ -4839,6 +4850,18 @@ impl Scene {
 
         let model_block = self.model_space_block_handle();
         let blk_cache = self.block_cache_arc();
+        // The visible background inside a paper-layout content viewport is
+        // the PaperCanvas sheet showing through the transparent shader,
+        // not the model bg. Adapt entity colours to the paper bg in that
+        // case so white wires on a light sheet turn black (and vice
+        // versa). In a Model layout this is unreachable in practice
+        // (active_viewport is a paper concept), but fall back to model bg
+        // just to stay consistent with the rest of the renderer.
+        let bg = if self.current_layout == "Model" {
+            self.bg_color
+        } else {
+            self.paper_bg_color
+        };
 
         self.document
             .entities()
@@ -4878,7 +4901,7 @@ impl Scene {
                     &self.selected,
                     self.active_viewport,
                     self.world_offset,
-                    self.bg_color,
+                    bg,
                     vp_anno_scale,
                     e,
                     Some(&blk_cache),

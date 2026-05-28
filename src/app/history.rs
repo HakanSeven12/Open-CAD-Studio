@@ -32,7 +32,11 @@ impl OpenCADStudio {
 
     pub(super) fn restore_history_snapshot(&mut self, i: usize, snapshot: HistorySnapshot) {
         self.tabs[i].scene.document = snapshot.document;
-        self.tabs[i].scene.current_layout = snapshot.current_layout;
+        self.tabs[i].scene.set_current_layout(snapshot.current_layout);
+        // Force a re-tessellation: the cached wires were keyed against the
+        // outgoing document / layout and would be returned unchanged
+        // otherwise (`set_current_layout` only bumps on actual change).
+        self.tabs[i].scene.bump_geometry();
         self.tabs[i].scene.selected = snapshot
             .selected
             .into_iter()

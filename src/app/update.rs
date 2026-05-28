@@ -3501,7 +3501,7 @@ impl OpenCADStudio {
                 self.layout_rename_state = None;
                 self.layout_context_menu = None;
                 self.tabs[i].scene.active_viewport = None;
-                self.tabs[i].scene.current_layout = name;
+                self.tabs[i].scene.set_current_layout(name);
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.restore_saved_camera();
                 self.tabs[i].last_synced_camera_gen = self.tabs[i].scene.camera_generation;

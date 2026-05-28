@@ -51,6 +51,11 @@ impl OpenCADStudio {
                         self.tabs[i].bg_color = None;
                         self.tabs[i].scene.bg_color = [0.11, 0.11, 0.11, 1.0];
                     }
+                    // Wire colour adaptation (`adapt_to_bg`) reads the bg
+                    // at tessellation time, so the cached wires need to
+                    // refresh — otherwise a light→dark bg flip leaves
+                    // black lines invisible against the new bg.
+                    self.tabs[i].scene.bump_geometry();
                     self.command_line
                         .push_output("Background reset to default.");
                 } else if args.len() >= 3 {
@@ -64,6 +69,7 @@ impl OpenCADStudio {
                         self.tabs[i].bg_color = Some([r, g, b, 1.0]);
                         self.tabs[i].scene.bg_color = [r, g, b, 1.0];
                     }
+                    self.tabs[i].scene.bump_geometry();
                     self.command_line.push_output(&format!(
                         "Background: rgb({}, {}, {})",
                         args[0], args[1], args[2]
