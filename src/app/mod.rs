@@ -43,6 +43,18 @@ pub struct GripPopup {
     pub items: Vec<crate::scene::object::GripMenuItem>,
     pub selected: usize,
 }
+
+/// Pending follow-up value for grip-menu actions that need a number
+/// (Lengthen / Radius / Arc Length / Rotate Text). The next number
+/// typed in the command line is parsed and routed into
+/// `apply_grip_menu_value` for `(handle, grip_id, action)`.
+#[derive(Clone, Debug)]
+pub struct GripPendingValue {
+    pub handle: acadrust::Handle,
+    pub grip_id: usize,
+    pub action: crate::scene::object::GripMenuAction,
+    pub label: &'static str,
+}
 use crate::snap::Snapper;
 use crate::ui::{AppMenu, CommandLine, Ribbon, StatusBar};
 use acadrust::types::{Color as AcadColor, LineWeight};
@@ -122,6 +134,7 @@ pub(super) struct OpenCADStudio {
     /// Open multi-functional grip popup. Persists across mouse moves
     /// until dismissed (click outside, ESC, cursor leaves the grip).
     grip_popup: Option<GripPopup>,
+    grip_pending: Option<GripPendingValue>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
     /// Whether the ViewCube 3D gizmo is visible in model space (NAVVCUBE).
@@ -806,6 +819,7 @@ impl OpenCADStudio {
             dyn_user_reshaped: false,
             grip_hover: None,
             grip_popup: None,
+            grip_pending: None,
             show_ucs_icon: true,
             show_viewcube: true,
             show_properties: true,

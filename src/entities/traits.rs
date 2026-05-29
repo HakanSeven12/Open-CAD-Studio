@@ -35,6 +35,28 @@ pub trait Grippable {
     /// Entities override this to mutate themselves when the user picks
     /// Add Vertex / Remove Vertex / Convert / Reverse / …
     fn apply_grip_menu(&mut self, _grip_id: usize, _action: GripMenuAction) {}
+    /// Same as `apply_grip_menu` but for actions that need a numeric
+    /// follow-up (Lengthen / Radius / Arc Length / Rotate Text / …).
+    /// The app prompts the user for a value on the command line and
+    /// calls this with the parsed `f64`.
+    fn apply_grip_menu_value(
+        &mut self,
+        _grip_id: usize,
+        _action: GripMenuAction,
+        _value: f64,
+    ) {}
+    /// If the popup action this entity defines for `grip_id` needs a
+    /// numeric prompt, return the prompt string and the action so the
+    /// app can stash a pending-value state and route the next typed
+    /// number into `apply_grip_menu_value`. `None` for one-shot
+    /// actions handled by `apply_grip_menu`.
+    fn grip_menu_value_prompt(
+        &self,
+        _grip_id: usize,
+        _action: GripMenuAction,
+    ) -> Option<&'static str> {
+        None
+    }
 }
 
 pub trait PropertyEditable {
@@ -78,6 +100,17 @@ pub trait EntityTypeOps {
     fn apply_geom_prop(&mut self, field: &str, value: &str);
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply);
     fn apply_grip_menu(&mut self, grip_id: usize, action: GripMenuAction);
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: GripMenuAction,
+    ) -> Option<&'static str>;
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: GripMenuAction,
+        value: f64,
+    );
     fn apply_transform(&mut self, t: &EntityTransform);
     fn mass_props(&self) -> Option<MassProps>;
     fn text_content(&self) -> Option<String>;
@@ -274,6 +307,47 @@ impl EntityTypeOps for EntityType {
     fn apply_grip_menu(&mut self, grip_id: usize, action: GripMenuAction) {
         dispatch!(self,
             |e| Grippable::apply_grip_menu(e, grip_id, action),
+            [
+                Line, Circle, Arc, Ellipse, LwPolyline, Polyline, Polyline2D,
+                Polyline3D, Ray, XLine, RasterImage, Wipeout,
+                AttributeDefinition, AttributeEntity, MLine, Tolerance,
+                Solid, Solid3D, Region, Body, Face3D, PolygonMesh,
+                PolyfaceMesh, Mesh, Table, Point, Spline, Text, MText,
+                Viewport, Insert, Leader, MultiLeader, Dimension, Hatch,
+                Underlay, Shape, Ole2Frame,
+            ],
+            _ => {},
+        )
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        grip_id: usize,
+        action: GripMenuAction,
+    ) -> Option<&'static str> {
+        dispatch!(self,
+            |e| Grippable::grip_menu_value_prompt(e, grip_id, action),
+            [
+                Line, Circle, Arc, Ellipse, LwPolyline, Polyline, Polyline2D,
+                Polyline3D, Ray, XLine, RasterImage, Wipeout,
+                AttributeDefinition, AttributeEntity, MLine, Tolerance,
+                Solid, Solid3D, Region, Body, Face3D, PolygonMesh,
+                PolyfaceMesh, Mesh, Table, Point, Spline, Text, MText,
+                Viewport, Insert, Leader, MultiLeader, Dimension, Hatch,
+                Underlay, Shape, Ole2Frame,
+            ],
+            _ => None,
+        )
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: GripMenuAction,
+        value: f64,
+    ) {
+        dispatch!(self,
+            |e| Grippable::apply_grip_menu_value(e, grip_id, action, value),
             [
                 Line, Circle, Arc, Ellipse, LwPolyline, Polyline, Polyline2D,
                 Polyline3D, Ray, XLine, RasterImage, Wipeout,

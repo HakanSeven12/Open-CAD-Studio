@@ -253,8 +253,55 @@ impl crate::entities::traits::Grippable for Arc {
         _grip_id: usize,
         _action: crate::scene::object::GripMenuAction,
     ) {
-        // Radius / Arc Length / Lengthen all need a follow-up prompt
-        // (numeric distance / length / radius) — Phase 3.
+        // Radius / Arc Length / Lengthen all need a follow-up prompt;
+        // the actual edit happens in `apply_grip_menu_value`.
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        _grip_id: usize,
+        action: crate::scene::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::object::GripMenuAction as A;
+        match action {
+            A::Radius => Some("New radius"),
+            A::ArcLength => Some("New arc length"),
+            A::Lengthen => Some("Distance"),
+            _ => None,
+        }
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::object::GripMenuAction as A;
+        match action {
+            A::Radius if value > 0.0 => self.radius = value,
+            A::ArcLength if value > 0.0 && self.radius > 1e-9 => {
+                // Hold start_angle, derive new end_angle from arc length
+                // = r * Δθ.
+                let new_span = value / self.radius;
+                self.end_angle = self.start_angle + new_span;
+            }
+            A::Lengthen => {
+                // Extend either end by `value` arc-length units along
+                // the arc. Positive `value` lengthens; negative
+                // shortens. Grip 1 = start endpoint, grip 2 = end endpoint.
+                if self.radius < 1e-9 {
+                    return;
+                }
+                let dtheta = value / self.radius;
+                match grip_id {
+                    1 => self.start_angle -= dtheta,
+                    2 => self.end_angle += dtheta,
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
 }
 

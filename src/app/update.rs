@@ -1019,6 +1019,39 @@ impl OpenCADStudio {
                 // dropdown so the dispatched command's new prompt is
                 // immediately visible on the overlay.
                 self.command_line.close_history();
+                // Grip-menu value prompt — consume the typed number and
+                // route it through `apply_grip_menu_value`.
+                if let Some(pending) = self.grip_pending.take() {
+                    let raw = self.command_line.input.trim().to_string();
+                    self.command_line.input.clear();
+                    let Ok(v) = raw.parse::<f64>() else {
+                        self.command_line.push_error(&format!(
+                            "{}: expected a number, got \"{raw}\"",
+                            pending.label
+                        ));
+                        return Task::none();
+                    };
+                    let i = self.active_tab;
+                    use crate::entities::traits::EntityTypeOps;
+                    self.push_undo_snapshot(i, pending.label);
+                    if let Some(entity) = self
+                        .tabs[i]
+                        .scene
+                        .document
+                        .get_entity_mut(pending.handle)
+                    {
+                        entity.apply_grip_menu_value(
+                            pending.grip_id,
+                            pending.action,
+                            v,
+                        );
+                    }
+                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].dirty = true;
+                    self.refresh_selected_grips();
+                    self.refresh_properties();
+                    return Task::none();
+                }
                 // Interactive VPORTS: the entry after a bare `VPORTS` is the
                 // tiled configuration. Empty input defaults to SINGLE.
                 if self.awaiting_vports {
@@ -1201,6 +1234,10 @@ impl OpenCADStudio {
                 // without doing anything else.
                 if self.grip_popup.take().is_some() {
                     self.grip_hover = None;
+                    return Task::none();
+                }
+                if self.grip_pending.take().is_some() {
+                    self.command_line.input.clear();
                     return Task::none();
                 }
                 // Cancel layout rename / context menus first, then fall through.
@@ -3143,10 +3180,28 @@ impl OpenCADStudio {
                 use crate::entities::traits::EntityTypeOps;
                 use crate::scene::object::GripMenuAction;
                 if matches!(item.action, GripMenuAction::Stretch) {
-                    // Default action: nothing — user can click the grip
-                    // to start the normal drag.
                     return Task::none();
                 }
+                // Actions that need a follow-up number stash a pending
+                // state + prompt; the next typed value drives
+                // `apply_grip_menu_value`.
+                let prompt = self
+                    .tabs[i]
+                    .scene
+                    .document
+                    .get_entity(popup.handle)
+                    .and_then(|e| e.grip_menu_value_prompt(popup.grip_id, item.action));
+                if let Some(label) = prompt {
+                    self.grip_pending = Some(super::GripPendingValue {
+                        handle: popup.handle,
+                        grip_id: popup.grip_id,
+                        action: item.action,
+                        label,
+                    });
+                    self.command_line.push_info(&format!("{label}:"));
+                    return self.focus_cmd_input();
+                }
+                // One-shot action — apply immediately.
                 self.push_undo_snapshot(i, item.label);
                 if let Some(entity) = self
                     .tabs[i]

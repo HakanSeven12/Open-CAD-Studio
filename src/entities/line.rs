@@ -182,7 +182,55 @@ impl crate::entities::traits::Grippable for Line {
         _grip_id: usize,
         _action: crate::scene::object::GripMenuAction,
     ) {
-        // Lengthen requires a follow-up distance prompt — Phase 3.
+        // Lengthen needs a follow-up distance — handled by
+        // `apply_grip_menu_value`.
+    }
+
+    fn grip_menu_value_prompt(
+        &self,
+        _grip_id: usize,
+        action: crate::scene::object::GripMenuAction,
+    ) -> Option<&'static str> {
+        use crate::scene::object::GripMenuAction as A;
+        match action {
+            A::Lengthen => Some("Distance"),
+            _ => None,
+        }
+    }
+
+    fn apply_grip_menu_value(
+        &mut self,
+        grip_id: usize,
+        action: crate::scene::object::GripMenuAction,
+        value: f64,
+    ) {
+        use crate::scene::object::GripMenuAction as A;
+        if !matches!(action, A::Lengthen) {
+            return;
+        }
+        let dx = self.end.x - self.start.x;
+        let dy = self.end.y - self.start.y;
+        let dz = self.end.z - self.start.z;
+        let len = (dx * dx + dy * dy + dz * dz).sqrt();
+        if len < 1e-12 {
+            return;
+        }
+        let (ux, uy, uz) = (dx / len, dy / len, dz / len);
+        match grip_id {
+            0 => {
+                // Move start endpoint backward along the line by `value`
+                // (positive = lengthen; negative = shorten).
+                self.start.x -= ux * value;
+                self.start.y -= uy * value;
+                self.start.z -= uz * value;
+            }
+            1 => {
+                self.end.x += ux * value;
+                self.end.y += uy * value;
+                self.end.z += uz * value;
+            }
+            _ => {}
+        }
     }
 }
 
