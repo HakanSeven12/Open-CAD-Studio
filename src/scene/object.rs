@@ -111,6 +111,7 @@ pub struct GripMenuItem {
 /// default no-op-equivalent — picking it just starts the regular
 /// stretch drag, identical to clicking the grip with no popup open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum GripMenuAction {
     Stretch,
     Lengthen,

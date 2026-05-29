@@ -691,7 +691,20 @@ impl OpenCADStudio {
             if !tab.is_start {
                 let anchor_x = (popup.anchor.x + 12.0).max(0.0);
                 let anchor_y = (popup.anchor.y + 12.0).max(0.0);
-                let mut col = column![].spacing(0);
+                // Size the row to the widest label so the selection
+                // highlight fills the whole row instead of just the
+                // text glyphs. ~7 px per character at size 12 + the
+                // horizontal padding (10 + 10).
+                let max_len = popup
+                    .items
+                    .iter()
+                    .map(|i| i.label.chars().count())
+                    .max()
+                    .unwrap_or(8) as f32;
+                let row_w = max_len * 7.0 + 24.0;
+                let mut col = column![]
+                    .spacing(0)
+                    .width(iced::Length::Fixed(row_w));
                 for (idx, item) in popup.items.iter().enumerate() {
                     let is_sel = idx == popup.selected;
                     let label = item.label;
@@ -727,7 +740,6 @@ impl OpenCADStudio {
                 }
                 let menu_panel = container(col)
                     .padding(2)
-                    .width(iced::Length::Shrink)
                     .style(|_: &Theme| container::Style {
                         background: Some(Background::Color(Color {
                             r: 0.10,
