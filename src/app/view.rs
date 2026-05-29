@@ -684,9 +684,9 @@ impl OpenCADStudio {
             }
         }
 
-        // Multi-functional grip popup (Phase 2). Floating column of
-        // menu items at the grip's screen position, with the selected
-        // item highlighted. Each item dispatches `GripMenuPick`.
+        // Multi-functional grip popup (Phase 2). One bordered container
+        // wraps a column of borderless item buttons so the popup reads
+        // as a single widget instead of stacked tiles.
         if let Some(popup) = self.grip_popup.as_ref() {
             if !tab.is_start {
                 let anchor_x = (popup.anchor.x + 12.0).max(0.0);
@@ -697,48 +697,61 @@ impl OpenCADStudio {
                     let label = item.label;
                     let btn = button(text(label).size(12).color(Color::WHITE))
                         .on_press(Message::GripMenuPick(idx))
-                        .padding([4, 10])
+                        .padding([3, 10])
+                        .width(Fill)
                         .style(move |_: &Theme, status| iced::widget::button::Style {
                             background: Some(Background::Color(match (is_sel, status) {
                                 (true, _) => Color {
                                     r: 0.20,
                                     g: 0.45,
                                     b: 0.95,
-                                    a: 0.95,
-                                },
-                                (_, iced::widget::button::Status::Hovered) => Color {
-                                    r: 0.20,
-                                    g: 0.20,
-                                    b: 0.20,
-                                    a: 0.95,
-                                },
-                                _ => Color {
-                                    r: 0.10,
-                                    g: 0.10,
-                                    b: 0.10,
-                                    a: 0.92,
-                                },
-                            })),
-                            border: Border {
-                                color: Color {
-                                    r: 0.35,
-                                    g: 0.35,
-                                    b: 0.35,
                                     a: 1.0,
                                 },
-                                width: 1.0,
+                                (_, iced::widget::button::Status::Hovered) => Color {
+                                    r: 0.22,
+                                    g: 0.22,
+                                    b: 0.22,
+                                    a: 1.0,
+                                },
+                                _ => Color::TRANSPARENT,
+                            })),
+                            border: Border {
+                                color: Color::TRANSPARENT,
+                                width: 0.0,
                                 radius: 0.0.into(),
                             },
                             text_color: Color::WHITE,
                             ..Default::default()
                         });
-                    col = col.push(iced::widget::opaque(btn));
+                    col = col.push(btn);
                 }
+                let menu_panel = container(col)
+                    .padding(2)
+                    .width(iced::Length::Shrink)
+                    .style(|_: &Theme| container::Style {
+                        background: Some(Background::Color(Color {
+                            r: 0.10,
+                            g: 0.10,
+                            b: 0.10,
+                            a: 0.95,
+                        })),
+                        border: Border {
+                            color: Color {
+                                r: 0.40,
+                                g: 0.40,
+                                b: 0.40,
+                                a: 1.0,
+                            },
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    });
                 let popup_layer = iced::widget::column![
                     Space::new().height(iced::Length::Fixed(anchor_y)),
                     iced::widget::row![
                         Space::new().width(iced::Length::Fixed(anchor_x)),
-                        col,
+                        iced::widget::opaque(menu_panel),
                     ],
                 ]
                 .width(Fill)

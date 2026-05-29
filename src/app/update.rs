@@ -937,6 +937,15 @@ impl OpenCADStudio {
                 self.focus_cmd_input()
             }
 
+            Message::DynTabNext if self.grip_popup.is_some() => {
+                if let Some(popup) = self.grip_popup.as_mut() {
+                    if !popup.items.is_empty() {
+                        popup.selected = (popup.selected + 1) % popup.items.len();
+                    }
+                }
+                Task::none()
+            }
+
             Message::DynTabNext => {
                 let i = self.active_tab;
                 let n = self.tabs[i].dyn_fields.len();
@@ -954,6 +963,17 @@ impl OpenCADStudio {
             }
 
             Message::CommandHistoryPrev => {
+                // Grip popup wins first — arrow keys walk its items.
+                if let Some(popup) = self.grip_popup.as_mut() {
+                    if !popup.items.is_empty() {
+                        popup.selected = if popup.selected == 0 {
+                            popup.items.len() - 1
+                        } else {
+                            popup.selected - 1
+                        };
+                    }
+                    return Task::none();
+                }
                 // While autocomplete is showing suggestions, ↑ walks up
                 // that list. Otherwise it falls back to recall history.
                 let i = self.active_tab;
@@ -967,6 +987,12 @@ impl OpenCADStudio {
             }
 
             Message::CommandHistoryNext => {
+                if let Some(popup) = self.grip_popup.as_mut() {
+                    if !popup.items.is_empty() {
+                        popup.selected = (popup.selected + 1) % popup.items.len();
+                    }
+                    return Task::none();
+                }
                 let i = self.active_tab;
                 if self.tabs[i].active_cmd.is_none()
                     && self.command_line.autocomplete_next()
@@ -1142,6 +1168,15 @@ impl OpenCADStudio {
             }
 
             Message::CommandFinalize => {
+                // Grip popup open → Enter commits the highlighted item.
+                if self.grip_popup.is_some() {
+                    let idx = self
+                        .grip_popup
+                        .as_ref()
+                        .map(|p| p.selected)
+                        .unwrap_or(0);
+                    return Task::done(Message::GripMenuPick(idx));
+                }
                 // A typed dynamic-input value commits as a point pick
                 // before the plain-Enter (on_enter) path runs.
                 if let Some(task) = self.try_dyn_commit() {
@@ -1162,6 +1197,12 @@ impl OpenCADStudio {
             }
 
             Message::CommandEscape => {
+                // Grip popup intercepts Escape — dismisses the menu
+                // without doing anything else.
+                if self.grip_popup.take().is_some() {
+                    self.grip_hover = None;
+                    return Task::none();
+                }
                 // Cancel layout rename / context menus first, then fall through.
                 let i_e = self.active_tab;
                 {
@@ -2166,6 +2207,14 @@ impl OpenCADStudio {
 
             Message::ViewportLeftPress => {
                 let i = self.active_tab;
+                // Click anywhere outside the popup dismisses it. The
+                // menu's own buttons live above this mouse_area, so a
+                // press that reaches here means the cursor is not on
+                // any menu item.
+                if self.grip_popup.take().is_some() {
+                    self.grip_hover = None;
+                    return Task::none();
+                }
                 let (p, vp_size) = {
                     let sel = self.tabs[i].scene.selection.borrow();
                     let p = match sel.last_move_pos {
