@@ -1458,7 +1458,7 @@ fn viewport_context_menu_overlay(
         items.push(item("Quick Select...".to_string(), Message::QSelectOpen));
         items.push(item(
             "Zoom Extents".to_string(),
-            Message::Command("ZOOM".to_string()),
+            Message::Command("ZOOM EXTENTS".to_string()),
         ));
     }
 

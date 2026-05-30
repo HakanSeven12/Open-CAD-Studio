@@ -4948,7 +4948,17 @@ impl Scene {
     }
 
     pub fn fit_all(&mut self) {
-        let wires = self.entity_wires();
+        // Use the FULL, un-culled wire set — not `entity_wires()`, which is
+        // frustum-culled to the current view. Culled input would fit only the
+        // entities already on screen, so each call would zoom out a little and
+        // reveal more, converging on the true extent only after several uses
+        // (issue #51). `wpp = None` also tessellates at a fixed tolerance so
+        // the bounds don't drift with zoom-adaptive curve sampling.
+        let layout_block = self.current_layout_block_handle();
+        let mut wires = self.wires_for_block_culled(layout_block, None, None, None, None);
+        if self.current_layout != "Model" {
+            wires.extend(self.viewport_content_wires(layout_block, None, None));
+        }
         if wires.is_empty() {
             return;
         }
