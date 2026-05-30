@@ -1240,6 +1240,13 @@ impl OpenCADStudio {
                     self.command_line.input.clear();
                     return Task::none();
                 }
+                // A hot grip (click-move-click placement in progress) ends on
+                // Escape, leaving the entity at its last previewed position.
+                if self.tabs[self.active_tab].active_grip.take().is_some() {
+                    self.tabs[self.active_tab].snap_result = None;
+                    self.refresh_properties();
+                    return Task::none();
+                }
                 // Cancel layout rename / context menus first, then fall through.
                 let i_e = self.active_tab;
                 if self.qselect.take().is_some() {
@@ -2348,7 +2355,10 @@ impl OpenCADStudio {
                     height: vh,
                 };
 
-                if self.tabs[i].active_cmd.is_none() && !self.tabs[i].selected_grips.is_empty() {
+                if self.tabs[i].active_cmd.is_none()
+                    && self.tabs[i].active_grip.is_none()
+                    && !self.tabs[i].selected_grips.is_empty()
+                {
                     if let Some(handle) = self.tabs[i].selected_handle {
                         let is_paper = self.tabs[i].scene.current_layout != "Model";
                         let grip_hit = if is_paper {
@@ -2425,8 +2435,29 @@ impl OpenCADStudio {
                     (p, !sel.left_dragging, sel.left_down)
                 };
 
-                if self.tabs[i].active_grip.is_some() {
+                // Grip editing: click-move-click (plus legacy press-drag).
+                // The grip engages on press (active_grip set). This release
+                // commits only if the grip has actually moved, or if it was a
+                // press-drag. A bare engaging click (no movement yet) keeps the
+                // grip hot so the user can move the cursor and click again to
+                // place it. Escape cancels (handled elsewhere).
+                if let Some(grip) = self.tabs[i].active_grip.clone() {
+                    // Reset mouse state so the lingering press from the engaging
+                    // click doesn't read as an in-progress drag on later moves.
+                    {
+                        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+                        sel.left_down = false;
+                        sel.left_press_pos = None;
+                        sel.left_press_time = None;
+                        sel.left_dragging = false;
+                    }
+                    let moved = grip.last_world != grip.origin_world;
+                    if is_click && !moved {
+                        // Engaging click — stay hot, wait for the placement click.
+                        return Task::none();
+                    }
                     self.tabs[i].active_grip = None;
+                    self.tabs[i].snap_result = None;
                     self.refresh_properties();
                     return Task::none();
                 }
